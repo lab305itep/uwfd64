@@ -226,7 +226,7 @@ private:
 	struct uwfd64_a32_reg *a32;
 public:
 	uwfd64(int sernum, int gnum, unsigned short *space_a16, unsigned int *space_a32);
-	int ConfigureMasterClock(int sel, int div);
+	int ConfigureMasterClock(int sel, int div, int erc = 0);
 	int DACSet(int val);
 	int I2CRead(int addr);
 	int I2CWrite(int addr, int val);

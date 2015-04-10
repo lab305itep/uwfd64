@@ -21,11 +21,12 @@ uwfd64::uwfd64(int sernum, int gnum, unsigned short *space_a16, unsigned int *sp
 //	Configure Master clock multiplexer CDCUN1208LP
 //	sel - input clock select: 0 - internal, 1 - external
 //	div - input clock divider: 0 - 1, 1 - 2, 2 - 4, 3 - 8.
+//	erc - output spped: 0 - CDCUN_OUT_ERC_FAST, 1 - CDCUN_OUT_ERC_MEDIUM, 2 - CDCUN_OUT_ERC_SLOW 
 //	Return 0 if OK, or number of errors met
-int uwfd64::ConfigureMasterClock(int sel, int div)
+int uwfd64::ConfigureMasterClock(int sel, int div, int erc)
 {
 	int errcnt;
-	int w;
+	int w, s;
 	errcnt = 0;
 	int i;
 		// Write
@@ -33,12 +34,20 @@ int uwfd64::ConfigureMasterClock(int sel, int div)
 	w = (div & 3) << 4;						// divider
 	w += (sel) ? CDCUN_INPUT_MUX_IN2 : CDCUN_INPUT_MUX_IN1;		// select
 	if(I2CWrite(CDCUN_INPUT_ADDR, w)) errcnt++;			// Input control
-	for (i=3; i<8; i++) if(I2CWrite(i, CDCUN_OUT_ERC_FAST + CDCUN_OUT_DIFF_ON)) errcnt++;	// Set outputs
+	for (i=0; i<3; i++) if(I2CWrite(i, CDCUN_OUT_DISABLE)) errcnt++;	// Disable empty outputs
+	switch(erc) {
+		case 1: s = CDCUN_OUT_ERC_MEDIUM; break;
+		case 2: s = CDCUN_OUT_ERC_SLOW; break;
+		default: s = CDCUN_OUT_ERC_FAST; break;
+	}
+	s += CDCUN_OUT_DIFF_ON;
+	for (i=3; i<8; i++) if(I2CWrite(i, s)) errcnt++;	// Set outputs
 	if(I2CWrite(CDCUN_CTRL_ADDR, 0)) errcnt++;	// Enable clock
 		// Verify
 	if(I2CRead(CDCUN_CTRL_ADDR)) errcnt++;
 	if(I2CRead(CDCUN_INPUT_ADDR) != w) errcnt++;
-	for (i=3; i<8; i++) if(I2CRead(i) != CDCUN_OUT_ERC_FAST + CDCUN_OUT_DIFF_ON) errcnt++;
+	for (i=0; i<3; i++) if(I2CRead(i) != CDCUN_OUT_DISABLE) errcnt++;
+	for (i=3; i<8; i++) if(I2CRead(i) != s) errcnt++;
 	
 	return errcnt;
 }
@@ -71,28 +80,28 @@ int uwfd64::I2CRead(int addr)
 	// send chip address
 	a32->i2c.dat = CDCUN_ADDR;
 	a32->i2c.csr = I2C_SR_START + I2C_SR_WRITE;
-    	for (i = 0; i < I2C_TIMEOUT; i++) if (!(a32->i2c.csr & I2C_SR_BUSY)) break;
+    	for (i = 0; i < I2C_TIMEOUT; i++) if (!(a32->i2c.csr & I2C_SR_TRANSFER_IN_PRG)) break;
 	if (i == I2C_TIMEOUT) goto err;
 	// send register address
 	a32->i2c.dat = addr & 0x7F;
 	a32->i2c.csr = I2C_SR_WRITE;
-    	for (i = 0; i < I2C_TIMEOUT; i++) if (!(a32->i2c.csr & I2C_SR_BUSY)) break;
+    	for (i = 0; i < I2C_TIMEOUT; i++) if (!(a32->i2c.csr & I2C_SR_TRANSFER_IN_PRG)) break;
 	if (i == I2C_TIMEOUT) goto err;
 	// send chip address again with direction bit set
 	a32->i2c.dat = CDCUN_ADDR + I2C_DAT_DDIR;
 	a32->i2c.csr = I2C_SR_START + I2C_SR_WRITE;
-    	for (i = 0; i < I2C_TIMEOUT; i++) if (!(a32->i2c.csr & I2C_SR_BUSY)) break;
+    	for (i = 0; i < I2C_TIMEOUT; i++) if (!(a32->i2c.csr & I2C_SR_TRANSFER_IN_PRG)) break;
 	if (i == I2C_TIMEOUT) goto err;
 	// read high byte
 	a32->i2c.csr = I2C_SR_READ;
-    	for (i = 0; i < I2C_TIMEOUT; i++) if (!(a32->i2c.csr & I2C_SR_BUSY)) break;
+    	for (i = 0; i < I2C_TIMEOUT; i++) if (!(a32->i2c.csr & I2C_SR_TRANSFER_IN_PRG)) break;
 	if (i == I2C_TIMEOUT) goto err;
-	val = (a32->i2c.dat && 0xFF) << 8;
+	val = (a32->i2c.dat & 0xFF) << 8;
 	// read low byte
 	a32->i2c.csr = I2C_SR_READ + I2C_SR_STOP + I2C_SR_ACK;
-    	for (i = 0; i < I2C_TIMEOUT; i++) if (!(a32->i2c.csr & I2C_SR_BUSY)) break;
+    	for (i = 0; i < I2C_TIMEOUT; i++) if (!(a32->i2c.csr & I2C_SR_TRANSFER_IN_PRG)) break;
 	if (i == I2C_TIMEOUT) goto err;
-	val += a32->i2c.dat && 0xFF;	
+	val += a32->i2c.dat & 0xFF;
 	return val;
 err:
 	a32->i2c.csr = I2C_SR_STOP;
@@ -108,22 +117,22 @@ int uwfd64::I2CWrite(int addr, int val)
 	// send chip address
 	a32->i2c.dat = CDCUN_ADDR;
 	a32->i2c.csr = I2C_SR_START + I2C_SR_WRITE;
-    	for (i = 0; i < I2C_TIMEOUT; i++) if (!(a32->i2c.csr & I2C_SR_BUSY)) break;
+    	for (i = 0; i < I2C_TIMEOUT; i++) if (!(a32->i2c.csr & I2C_SR_TRANSFER_IN_PRG)) break;
 	if (i == I2C_TIMEOUT) goto err;
 	// send register address
 	a32->i2c.dat = addr & 0x7F;
 	a32->i2c.csr = I2C_SR_WRITE;
-    	for (i = 0; i < I2C_TIMEOUT; i++) if (!(a32->i2c.csr & I2C_SR_BUSY)) break;
+    	for (i = 0; i < I2C_TIMEOUT; i++) if (!(a32->i2c.csr & I2C_SR_TRANSFER_IN_PRG)) break;
 	if (i == I2C_TIMEOUT) goto err;
 	// send high byte
 	a32->i2c.dat = (val >> 8) & 0xFF;
 	a32->i2c.csr = I2C_SR_WRITE;
-    	for (i = 0; i < I2C_TIMEOUT; i++) if (!(a32->i2c.csr & I2C_SR_BUSY)) break;
+    	for (i = 0; i < I2C_TIMEOUT; i++) if (!(a32->i2c.csr & I2C_SR_TRANSFER_IN_PRG)) break;
 	if (i == I2C_TIMEOUT) goto err;
 	// send low byte
 	a32->i2c.dat = val & 0xFF;
 	a32->i2c.csr = I2C_SR_WRITE + I2C_SR_STOP;
-    	for (i = 0; i < I2C_TIMEOUT; i++) if (!(a32->i2c.csr & I2C_SR_BUSY)) break;
+    	for (i = 0; i < I2C_TIMEOUT; i++) if (!(a32->i2c.csr & I2C_SR_TRANSFER_IN_PRG)) break;
 	if (i == I2C_TIMEOUT) goto err;
 	return 0;
 err:
@@ -205,7 +214,7 @@ int uwfd64::Init(void)
 	a32->i2c.presc[0] = I2C_PRESC & 0xFF;
 	a32->i2c.presc[1] = (I2C_PRESC >> 8) & 0xFF;
 	a32->i2c.ctr = I2C_CTR_CORE_ENABLE;
-	ConfigureMasterClock(0, 0);	// internal clock, no divider.
+	ConfigureMasterClock(0, 0, 0);	// internal clock, no divider.
 	// Set DAC to middle range
 	if(DACSet(0x2000)) errcnt++;
 	return errcnt;

@@ -140,12 +140,15 @@ int uwfd64_tool::DoTest(uwfd64 *ptr, int type, int cnt)
 	switch(type) {
 	case 0:
 		irc = ptr->TestReg32(cnt);
+		printf("Test 0 for %d => %d / %d\n", ptr->GetSerial(), irc, cnt);
+		break;
 	case 1:
 		irc = 0;
 		for (i=0; i<cnt; i++) irc += ptr->ConfigureMasterClock(0, 0);
 		break;
 	default:
 		irc = -10;
+		break;
 	}
 	return irc;
 }
@@ -163,7 +166,7 @@ void uwfd64_tool::I2CRead(int serial, int addr)
 			printf("Module %d not found.\n", serial);
 			return;
 		}
-		printf("Module %d@%d ICX[%X] = %X\n", serial, ptr->GetGA(), addr, ptr->I2CRead(addr));
+		printf("Module %d@%d I2C[%X] = %X\n", serial, ptr->GetGA(), addr, ptr->I2CRead(addr));
 	}
 }
 
