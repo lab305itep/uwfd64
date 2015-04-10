@@ -2,6 +2,7 @@
 	Moscow, ITEP, I. Alekseev, D. Kalinkin, D. Svirida
 	Support UWFD64 modules.
 */
+#include <memory.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -297,6 +298,33 @@ void uwfd64::Reset(void)
 	a32->csr.out &= ~MAIN_CSR_RESET;
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Write/read random number test of the SDRAM memory
+//	cnt - amount of memory in Mbytes to test
+//	Return number of errors. Negative number is returned on access error.
+int uwfd64::TestMem(int cnt)
+{
+	int irc;
+	int errcnt;
+	int i, j;
+	int seed, rseed;
+	int *buf;
+	unsigned long long vme_addr;
+	
+	buf = (int *) malloc(MBYTE / sizeof(int));
+	seed = time(NULL);
+	
+	for (i = 0; i < cnt; i++) {
+		
+	}
+	
+	free(buf);
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Write/read random number test of the dedicated test register
+//	cnt - repeat counter
+//	Return number of errors
 int uwfd64::TestReg32(int cnt)
 {
 	int i, r, w, errcnt;

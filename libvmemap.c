@@ -119,10 +119,41 @@ int vmemap_a64_write(
 	int data			// the data
 ) {
 	unsigned int *ptr;
-	int r;
 	ptr = vmemap_open(unit, vme_addr, sizeof(int), VME_A64, VME_USER | VME_DATA, VME_D32); 
 	if (!ptr) return -1;
 	*ptr = data;
+	vmemap_close(ptr);
+	return 0;
+}
+
+/* Read block A64D32. Return 0 if OK, -1 on error */
+int vmemap_a64_blkread(
+	unsigned int unit, 		// Tundra master window.
+	unsigned long long vme_addr, 	// VME address
+	unsigned int *data,		// buffer for data
+	int len				// length in bytes
+) {
+	unsigned int *ptr;
+	int i;
+	ptr = vmemap_open(unit, vme_addr, sizeof(int), VME_A64, VME_USER | VME_DATA, VME_D32); 
+	if (!ptr) return -1;
+	for (i=0; i<len/4; i++) data[i] = ptr[i];
+	vmemap_close(ptr);
+	return 0;
+}
+
+
+/* Write block A64D32. Return 0 if OK, negative number on error */
+int vmemap_a64_blkwrite(
+	unsigned int unit, 		// Tundra master window.
+	unsigned long long vme_addr, 	// VME address
+	unsigned int *data,		// the data
+	int len				// length in bytes
+) {
+	unsigned int *ptr;
+	ptr = vmemap_open(unit, vme_addr, sizeof(int), VME_A64, VME_USER | VME_DATA, VME_D32); 
+	if (!ptr) return -1;
+	for (i=0; i<len/4; i++) ptr[i] = data[i];
 	vmemap_close(ptr);
 	return 0;
 }

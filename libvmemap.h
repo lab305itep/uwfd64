@@ -47,17 +47,20 @@ int vmemap_a64_write(
 	int data			// the data
 );
 
-/* Read block A64D32. Return 0??? if OK, -1 on error */
-int vmemap_a64_read(
-	unsigned int unit, 		// Tundra master window.
-	unsigned long long vme_addr 	// VME address
-);
-
-/* Write A64D32. Return 0 if OK, negative number on error */
-int vmemap_a64_write(
+/* Read block A64D32. Return 0 if OK, -1 on error */
+int vmemap_a64_blkread(
 	unsigned int unit, 		// Tundra master window.
 	unsigned long long vme_addr, 	// VME address
-	int data			// the data
+	unsigned int *data,		// buffer for data
+	int len				// length in bytes
+);
+
+/* Write block A64D32. Return 0 if OK, negative number on error */
+int vmemap_a64_blkwrite(
+	unsigned int unit, 		// Tundra master window.
+	unsigned long long vme_addr, 	// VME address
+	unsigned int *data,		// the data
+	int len				// length in bytes
 );
 
 /* Sleep number of usec using nanosleep */

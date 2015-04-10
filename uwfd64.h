@@ -217,6 +217,9 @@ struct uwfd64_a32_reg {
 #define A64BASE 0xAAAAAA0000000000ULL
 #define A64STEP 0x100000000ULL
 #define A64UNIT 2
+#define MEMSIZE 0x20000000	// bytes
+#define MEMSIZEM 0x200		// MBytes
+#define MBYTE   0x100000
 
 class uwfd64 {
 private:
@@ -228,6 +231,13 @@ public:
 	uwfd64(int sernum, int gnum, unsigned short *space_a16, unsigned int *space_a32);
 	int ConfigureMasterClock(int sel, int div, int erc = 0);
 	int DACSet(int val);
+	inline int GetBase16(void) { return A16BASE + serial * A16STEP; };
+	inline unsigned int GetBase32(void) { return A32BASE + ga * A32STEP; };
+	inline unsigned long long GetBase64(void) { return A64BASE + ga * A64STEP; };
+	inline int GetBatch(void) { return (a16->bnum >> 8) & 0xFF; };
+	inline int GetGA(void) { return ga; };
+	inline int GetSerial(void) { return serial; };
+	inline int GetVersion(void) { return a32->ver.in; };
 	int I2CRead(int addr);
 	int I2CWrite(int addr, int val);
 	int ICXRead(int addr);
@@ -235,12 +245,9 @@ public:
 	int Init(void);
 	int IsHere(void);
 	int IsDone(int wait = 0);
-	inline int GetBatch(void) { return (a16->bnum >> 8) & 0xFF; };
-	inline int GetGA(void) { return ga; };
-	inline int GetSerial(void) { return serial; };
-	inline int GetVersion(void) { return a32->ver.in; };
 	int Prog(char *fname = NULL);
 	void Reset(void);
+	int TestMem(int cnt);
 	int TestReg32(int cnt);
 };
 

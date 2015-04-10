@@ -251,9 +251,8 @@ void uwfd64_tool::List(void)
 		printf("No Serial  GA A16  A32      A64              Version  Done\n");
 		for (i=0; i<N; i++) printf("%2d %3d:%3d %2d %4.4X %8.8X %16.16LX %8.8X %3s\n", 
 			i + 1, array[i]->GetBatch(), array[i]->GetSerial(), array[i]->GetGA(), 
-			A16BASE + array[i]->GetGA() * A16STEP, A32BASE + array[i]->GetGA() * A32STEP, 
-			A64BASE + array[i]->GetGA() * A64STEP, array[i]->GetVersion(), 
-			array[i]->IsDone() ? "Yes" : "No ");
+			array[i]->GetBase16(), array[i]->GetBase32(), array[i]->GetBase64(), 
+			array[i]->GetVersion(), array[i]->IsDone() ? "Yes" : "No ");
 	}
 }
 
