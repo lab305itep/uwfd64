@@ -100,7 +100,7 @@ struct uwfd64_i2c_reg {
 	volatile unsigned int reserved[3];
 };
 
-#define I2C_TIMEOUT		100
+#define I2C_TIMEOUT		200
 #define I2C_PRESC               0xC0
 
 #define I2C_CTR_CORE_ENABLE     0x80
@@ -218,8 +218,138 @@ struct uwfd64_a32_reg {
 #define A64STEP 0x100000000ULL
 #define A64UNIT 2
 #define MEMSIZE 0x20000000	// bytes
-#define MEMSIZEM 0x200		// MBytes
 #define MBYTE   0x100000
+
+//	Slave Xilinxes address map
+#define ICX_SLAVE_STEP		0x2000
+#define ICX_SLAVE_CSR_IN	0
+#define ICX_SLAVE_CSR_OUT	1
+#define ICX_SLAVE_VER_IN	2
+#define ICX_SLAVE_VER_OUT	3
+#define ICX_SLAVE_SPI_DAT	4
+#define ICX_SLAVE_SPI_CSR	5
+#define ICX_SLAVE_I2C_PRCL	8
+#define ICX_SLAVE_I2C_PRCH	9
+#define ICX_SLAVE_I2C_CTR	10
+#define ICX_SLAVE_I2C_DAT	11
+#define ICX_SLAVE_I2C_CSR	12
+
+#define L2C_TIMEOUT		100
+
+//	ADC registers
+#define ADC_REG_CFG		0
+#define ADC_CFG_SDO		0x81
+#define	ADC_CFG_LSB		0x42
+#define ADC_CFG_RESET		0x24
+
+#define ADC_REG_ID		1
+#define ADC_REG_GRADE		2
+
+#define ADC_REG_MASK		5
+#define ADC_MASK_FCO		0x20
+#define ADC_MASK_DCO		0x10
+#define ADC_MASK_D		8
+#define ADC_MASK_C		4
+#define ADC_MASK_B		2
+#define ADC_MASK_A		1
+
+#define ADC_REG_PWR		8
+#define ADC_PWR_PIN		0x20
+#define ADC_PWR_DOWN		1
+#define ADC_PWR_STANDBY		2
+#define ADC_PWR_RESET		3
+
+#define ADC_REG_CLK		9
+#define ADC_CLK_STBON		1
+
+#define ADC_REG_DIV		11
+
+#define ADC_REG_ECTL		12
+#define ADC_ECTL_CHOP		4
+
+#define ADC_REG_TEST		13
+#define ADC_TEST_ALTER		0x40
+#define ADC_TEST_ONCE		0x80
+#define ADC_TEST_AONCE		0xC0
+#define ADC_TEST_RLONG		0x20
+#define ADC_TEST_RSHORT		0x10
+#define ADC_TEST_MSHORT		1
+#define ADC_TEST_FSPOS		2
+#define ADC_TEST_FSNEG		3
+#define ADC_TEST_CHECKBRD	4
+#define ADC_TEST_PN23		5
+#define ADC_TEST_PN9		6
+#define ADC_TEST_WTOGGLE	7
+#define ADC_TEST_USER		8
+#define ADC_TEST_BTOGGLE	9
+#define ADC_TEST_SYNC		10
+#define ADC_TEST_BIT		11
+#define ADC_TEST_MIXED		12
+
+#define ADC_REG_OFFSET		0x10
+
+#define ADC_REG_OUTPUT		0x14
+#define ADC_OUTPUT_IEEE		0x40
+#define ADC_OUTPUT_INVERT	4
+#define ADC_OUTPUT_COMPL	1
+
+#define ADC_REG_ADJUST		0x15
+#define ADC_ADJUST_200		0x10
+#define ADC_ADJUST_100		0x20
+#define ADC_ADJUST_2X		1
+
+#define ADC_REG_PHASE		0x16
+
+#define ADC_REG_VREF		0x18
+#define ADC_VREF_1_00VPP	0
+#define ADC_VREF_1_14VPP	1
+#define ADC_VREF_1_33VPP	2
+#define ADC_VREF_1_60VPP	3
+#define ADC_VREF_2_00VPP	4
+
+#define ADC_REG_PAT1L		0x19
+#define ADC_REG_PAT1H		0x1A
+#define ADC_REG_PAT2L		0x1B
+#define ADC_REG_PAT2H		0x1C
+
+#define ADC_REG_OCTL		0x21
+#define ADC_OCTL_LSB		0x80
+#define ADC_OCTL_SDRBIT		0
+#define ADC_OCTL_SDRBYTE	0x10
+#define ADC_OCTL_DDRBIT		0x20
+#define ADC_OCTL_DDRBYTE	0x30
+#define ADC_OCTL_SDRONE		0x40
+
+#define ADC_REG_CCTL		0x22
+#define ADC_CCTL_RESET		2
+#define ADC_CCTL_PWDOWN		1
+
+#define ADC_REG_OVERRIDE	0xFF
+#define ADC_OVERRIDE_FIRE	1
+
+#define ADC_REG_CONTROL		0x100
+#define ADC_CONTROL_OVERRIDE	0x40
+#define ADC_CONTROL_12BIT	0x20
+#define ADC_CONTROL_10BIT	0x30
+#define ADC_CONTROL_20MSPS	0
+#define ADC_CONTROL_40MSPS	1
+#define ADC_CONTROL_50MSPS	2
+#define ADC_CONTROL_65MSPS	3
+#define ADC_CONTROL_80MSPS	4
+#define ADC_CONTROL_105MSPS	5
+#define ADC_CONTROL_125MSPS	6
+
+#define ADC_REG_IOCTL2		0x101
+#define ADC_IOCTL12_SDIOPD	1
+
+#define ADC_REG_IOCTL3		0x102
+#define ADC_IOCTL3_VCMPD	8
+
+#define ADC_REG_SYNC		0x109
+#define ADC_SYNC_ENABLE		2
+#define ADC_REG_NEXTONLY	1
+
+#define SI5338_ADDR		0xE0
 
 class uwfd64 {
 private:
@@ -229,8 +359,11 @@ private:
 	struct uwfd64_a32_reg *a32;
 public:
 	uwfd64(int sernum, int gnum, unsigned short *space_a16, unsigned int *space_a32);
+	int ADCRead(int num, int addr);
+	int ADCWrite(int num, int addr, int val);
 	int ConfigureMasterClock(int sel, int div, int erc = 0);
 	int DACSet(int val);
+	int GetADCID(int num);
 	inline int GetBase16(void) { return A16BASE + serial * A16STEP; };
 	inline unsigned int GetBase32(void) { return A32BASE + ga * A32STEP; };
 	inline unsigned long long GetBase64(void) { return A64BASE + ga * A64STEP; };
@@ -238,6 +371,7 @@ public:
 	inline int GetGA(void) { return ga; };
 	inline int GetSerial(void) { return serial; };
 	inline int GetVersion(void) { return a32->ver.in; };
+	inline int GetSlaveVersion(int num) { return ICXRead(ICX_SLAVE_STEP * (num & 3) + ICX_SLAVE_VER_IN) & 0xFFFF; };
 	int I2CRead(int addr);
 	int I2CWrite(int addr, int val);
 	int ICXRead(int addr);
@@ -245,10 +379,15 @@ public:
 	int Init(void);
 	int IsHere(void);
 	int IsDone(int wait = 0);
+	int L2CRead(int num, int addr);
+	int L2CWrite(int num, int addr, int val);
 	int Prog(char *fname = NULL);
 	void Reset(void);
-	int TestMem(int cnt);
+	int Si5338Configure(int num, char *fname);
+	int TestADCReg(int cnt);
 	int TestReg32(int cnt);
+	int TestSDRAM(int cnt);
+	int TestSlaveReg16(int cnt);
 };
 
 #endif /* UWFD64_H */

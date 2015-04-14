@@ -1,5 +1,11 @@
+/*
+	Moscow, ITEP, I. Alekseev, D. Kalinkin, D. Svirida
+	Support UWFD64 modules. Test tool.
+*/
+
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/time.h>
 #include <readline/history.h>
 #include <readline/readline.h>
 #include "libvmemap.h"
@@ -24,13 +30,17 @@ public:
 	void A32Write(int addr, int val);
 	void A64Read(long long addr);
 	void A64Write(long long addr, int val);
+	void ADCRead(int serial, int num, int addr);	
+	void ADCWrite(int serial, int num, int addr, int ival);
 	void DACSet(int serial = -1, int val = 0x2000);
-	void I2CWrite(int serial, int addr, int ival);
 	void I2CRead(int serial, int addr);	
+	void I2CWrite(int serial, int addr, int ival);
 	inline int IsOK(void) { return a16 && a32; };
-	void ICXWrite(int serial, int addr, int ival);
 	void ICXRead(int serial, int addr);
+	void ICXWrite(int serial, int addr, int ival);
 	void Init(int serial = -1);
+	void L2CRead(int serial, int num, int addr);	
+	void L2CWrite(int serial, int num, int addr, int ival);
 	void List(void);
 	void Prog(int serial = -1, char *fname = NULL);
 	void Test(int serial = -1, int type = 0, int cnt = 1000000);
@@ -117,6 +127,39 @@ void uwfd64_tool::A64Write(long long addr, int val)
 	}
 }
 
+void uwfd64_tool::ADCRead(int serial, int num, int addr)
+{
+	int i;
+	uwfd64 *ptr;
+	if (serial < 0) {
+		for (i=0; i<N; i++) printf("Module %d@%d ADC[%X:%X] = %X\n", 
+			array[i]->GetSerial(), array[i]->GetGA(), num, addr, array[i]->ADCRead(num, addr));
+	} else {
+		ptr = FindSerial(serial);
+		if (ptr == NULL) {
+			printf("Module %d not found.\n", serial);
+			return;
+		}
+		printf("Module %d@%d ADC[%X:%X] = %X\n", serial, ptr->GetGA(), num, addr, ptr->ADCRead(num, addr));
+	}
+}
+
+void uwfd64_tool::ADCWrite(int serial, int num, int addr, int val)
+{
+	int i;
+	uwfd64 *ptr;
+	if (serial < 0) {
+		for (i=0; i<N; i++) array[i]->ADCWrite(num, addr, val);
+	} else {
+		ptr = FindSerial(serial);
+		if (ptr == NULL) {
+			printf("Module %d not found.\n", serial);
+			return;
+		}
+		ptr->ADCWrite(num, addr, val);
+	}
+}
+
 void uwfd64_tool::DACSet(int serial, int val)
 {
 	int i;
@@ -140,11 +183,19 @@ int uwfd64_tool::DoTest(uwfd64 *ptr, int type, int cnt)
 	switch(type) {
 	case 0:
 		irc = ptr->TestReg32(cnt);
-		printf("Test 0 for %d => %d / %d\n", ptr->GetSerial(), irc, cnt);
 		break;
 	case 1:
 		irc = 0;
 		for (i=0; i<cnt; i++) irc += ptr->ConfigureMasterClock(0, 0);
+		break;
+	case 2:
+		irc = ptr->TestSDRAM(cnt);
+		break;
+	case 3:
+		irc = ptr->TestSlaveReg16(cnt);
+		break;
+	case 4:
+		irc = ptr->TestADCReg(cnt);
 		break;
 	default:
 		irc = -10;
@@ -243,16 +294,59 @@ void uwfd64_tool::Init(int serial)
 	}
 }
 
-void uwfd64_tool::List(void)
+void uwfd64_tool::L2CRead(int serial, int num, int addr)
 {
 	int i;
+	uwfd64 *ptr;
+	if (serial < 0) {
+		for (i=0; i<N; i++) printf("Module %d@%d Si5338[%X:%X] = %X\n", 
+			array[i]->GetSerial(), array[i]->GetGA(), num, addr, array[i]->L2CRead(num, addr));
+	} else {
+		ptr = FindSerial(serial);
+		if (ptr == NULL) {
+			printf("Module %d not found.\n", serial);
+			return;
+		}
+		printf("Module %d@%d Si5338[%X:%X] = %X\n", serial, ptr->GetGA(), num, addr, ptr->L2CRead(num, addr));
+	}
+}
+
+void uwfd64_tool::L2CWrite(int serial, int num, int addr, int val)
+{
+	int i;
+	uwfd64 *ptr;
+	if (serial < 0) {
+		for (i=0; i<N; i++) array[i]->L2CWrite(num, addr, val);
+	} else {
+		ptr = FindSerial(serial);
+		if (ptr == NULL) {
+			printf("Module %d not found.\n", serial);
+			return;
+		}
+		ptr->L2CWrite(num, addr, val);
+	}
+}
+
+void uwfd64_tool::List(void)
+{
+	int i, j;
 	printf("%d modules found:\n", N);
 	if (N) {
-		printf("No Serial  GA A16  A32      A64              Version  Done\n");
-		for (i=0; i<N; i++) printf("%2d %3d:%3d %2d %4.4X %8.8X %16.16LX %8.8X %3s\n", 
-			i + 1, array[i]->GetBatch(), array[i]->GetSerial(), array[i]->GetGA(), 
-			array[i]->GetBase16(), array[i]->GetBase32(), array[i]->GetBase64(), 
-			array[i]->GetVersion(), array[i]->IsDone() ? "Yes" : "No ");
+		printf("No Serial  GA A16  A32      A64              Version  S0   S1   S2   S3   Done\n");
+		for (i=0; i<N; i++) {
+			printf("%2d %3d:%3d %2d %4.4X %8.8X %16.16LX %8.8X:%4.4X:%4.4X:%4.4X:%4.4X %3s\n", 
+				i + 1, array[i]->GetBatch(), array[i]->GetSerial(), array[i]->GetGA(), 
+				array[i]->GetBase16(), array[i]->GetBase32(), array[i]->GetBase64(), 
+				array[i]->GetVersion(), array[i]->GetSlaveVersion(0), array[i]->GetSlaveVersion(1), 
+				array[i]->GetSlaveVersion(2), array[i]->GetSlaveVersion(3), array[i]->IsDone() ? "Yes" : "No ");
+			
+			printf("ADC: ");
+			for (j=0; j<16; j++) printf("%4.4X ", array[i]->GetADCID(j));
+			printf("\nSi5338:");
+			for (j=0; j<4; j++) printf("%1.1X%2.2X%2.2X%2.2X%2.2X ", array[i]->L2CRead(j, 0),
+				array[i]->L2CRead(j, 2), array[i]->L2CRead(j, 3), array[i]->L2CRead(j, 4), array[i]->L2CRead(j, 5));
+			printf("\n");
+		}
 	}
 }
 
@@ -277,18 +371,32 @@ void uwfd64_tool::Prog(int serial, char *fname)
 void uwfd64_tool::Test(int serial, int type, int cnt)
 {
 	int i;
+	int irc;
+	double dt;
 	uwfd64 *ptr;
+	struct timeval t[2];
+
 	if (serial < 0) {
-		for (i=0; i<N; i++) printf("Serial %d test %d done with %d/%d errors.\n",
-			array[i]->GetSerial(), type, DoTest(array[i], type, cnt), cnt);
+		for (i=0; i<N; i++) {
+			gettimeofday(&t[0], NULL);
+			irc = DoTest(array[i], type, cnt);
+			gettimeofday(&t[1], NULL);
+			dt = t[1].tv_sec - t[0].tv_sec + (t[1].tv_usec - t[0].tv_usec) * 0.000001;
+			printf("Serial %d test %d done with %d/%d errors in %8.3f s.\n",
+				array[i]->GetSerial(), type, irc, cnt, dt);
+		}
 	} else {
 		ptr = FindSerial(serial);
 		if (ptr == NULL) {
 			printf("Module %d not found.\n", serial);
 			return;
 		}
-		printf("Serial %d test %d done with %d/%d errors.\n",
-			ptr->GetSerial(), type, DoTest(ptr, type, cnt), cnt);
+		gettimeofday(&t[0], NULL);
+		irc = DoTest(ptr, type, cnt);
+		gettimeofday(&t[1], NULL);
+		dt = t[1].tv_sec - t[0].tv_sec + (t[1].tv_usec - t[0].tv_usec) * 0.000001;
+		printf("Serial %d test %d done with %d/%d errors in %8.3f s.\n",
+			ptr->GetSerial(), type, irc, cnt, dt);
 	}
 }
 
@@ -307,9 +415,14 @@ void Help(void)
 	printf("L - List modules found;\n");
 	printf("P num|* [filename.bin] - Program. Use filename.bin or just pulse prog pin;\n");
 	printf("Q - Quit;\n");
+	printf("R num|* adc addr [data] - read/write ADC Registers;\n");
+	printf("S num|* xil addr [data] - read/write Si5338 registers;\n");
 	printf("T num|* type [cnt] - Test with type t and repeat counter cnt;\n");
 	printf("\t0 - write/read 32-bit register with random numbers;\n");
 	printf("\t1 - configure and read back master clock multiplexer TI CDCUN1208LP;\n");
+	printf("\t2 - test SDRAM;\n");
+	printf("\t3 - write/read 16-bit register in slave Xilinxex with random numbers;\n");
+	printf("\t4 - write/read 8-bit pattern 1 LSB register in ADCs with random numbers;\n");
 	printf("U num|* addr [data] - read/write 16-bit word to clock CDCUN1208LP chip using I2C;\n");
 	printf("X num|* addr [data] - send/receive data from slave Xilinxes via SPI. addr - SPI address.\n");
 }
@@ -321,6 +434,7 @@ int Process(char *cmd, uwfd64_tool *tool)
 	int serial;
 	int ival;
 	int addr;
+	int num;
 	long long laddr;
 
     	tok = strtok(cmd, DELIM);
@@ -420,6 +534,66 @@ int Process(char *cmd, uwfd64_tool *tool)
 		break;
 	case 'Q':	// Quit
         	return 1;
+	case 'R':	// ADC Registers
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need module serial number or *.\n");
+	    		Help();
+	    		break;
+		}
+		serial = (tok[0] == '*') ? -1 : strtol(tok, NULL, 0);
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need ADC number (0-15) or *.\n");
+	    		Help();
+	    		break;
+		}
+		num = strtol(tok, NULL, 0) & 0xF;
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need address.\n");
+	    		Help();
+	    		break;
+		}
+		addr = strtol(tok, NULL, 0);
+		tok = strtok(NULL, DELIM);
+		if (tok) {
+			ival = strtol(tok, NULL, 0);
+			tool->ADCWrite(serial, num, addr, ival);
+		} else {
+			tool->ADCRead(serial, num, addr);
+		}
+		break;		
+	case 'S':	// Si5338 Registers
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need module serial number or *.\n");
+	    		Help();
+	    		break;
+		}
+		serial = (tok[0] == '*') ? -1 : strtol(tok, NULL, 0);
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need ADC number (0-15) or *.\n");
+	    		Help();
+	    		break;
+		}
+		num = strtol(tok, NULL, 0) & 3;
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need address.\n");
+	    		Help();
+	    		break;
+		}
+		addr = strtol(tok, NULL, 0);
+		tok = strtok(NULL, DELIM);
+		if (tok) {
+			ival = strtol(tok, NULL, 0);
+			tool->L2CWrite(serial, num, addr, ival);
+		} else {
+			tool->L2CRead(serial, num, addr);
+		}
+		break;		
 	case 'T':	// Test
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {

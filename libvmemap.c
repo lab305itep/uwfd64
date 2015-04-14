@@ -135,7 +135,7 @@ int vmemap_a64_blkread(
 ) {
 	unsigned int *ptr;
 	int i;
-	ptr = vmemap_open(unit, vme_addr, sizeof(int), VME_A64, VME_USER | VME_DATA, VME_D32); 
+	ptr = vmemap_open(unit, vme_addr, len, VME_A64, VME_USER | VME_DATA, VME_D32); 
 	if (!ptr) return -1;
 	for (i=0; i<len/4; i++) data[i] = ptr[i];
 	vmemap_close(ptr);
@@ -151,7 +151,8 @@ int vmemap_a64_blkwrite(
 	int len				// length in bytes
 ) {
 	unsigned int *ptr;
-	ptr = vmemap_open(unit, vme_addr, sizeof(int), VME_A64, VME_USER | VME_DATA, VME_D32); 
+	int i;
+	ptr = vmemap_open(unit, vme_addr, len, VME_A64, VME_USER | VME_DATA, VME_D32); 
 	if (!ptr) return -1;
 	for (i=0; i<len/4; i++) ptr[i] = data[i];
 	vmemap_close(ptr);

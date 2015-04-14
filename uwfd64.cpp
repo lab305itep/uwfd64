@@ -19,6 +19,50 @@ uwfd64::uwfd64(int sernum, int gnum, unsigned short *space_a16, unsigned int *sp
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Read ADC chip 8-bit registers via SPI
+//	num - 0-15 ADC chip number
+//	addr - register address
+//	return register value, negative on error.
+int uwfd64::ADCRead(int num, int addr)
+{
+    	int xil;
+
+    	xil = ICX_SLAVE_STEP * ((num >> 2) & 3);
+    	if (ICXWrite(xil + ICX_SLAVE_SPI_CSR, SPI_CSR_CS << (num & 3))) goto err;	// frame begin
+    	if (ICXWrite(xil + ICX_SLAVE_SPI_DAT, (addr >> 8) | 0x80)) goto err;
+    	if (ICXWrite(xil + ICX_SLAVE_SPI_DAT, addr & 0xFF)) goto err;
+    	if (ICXWrite(xil + ICX_SLAVE_SPI_CSR, SPI_CSR_CS << (num & 3) + SPI_CSR_DIR)) goto err;	// switch to input data
+    	if (ICXWrite(xil + ICX_SLAVE_SPI_DAT, 0)) goto err;
+    	if (ICXWrite(xil + ICX_SLAVE_SPI_CSR, 0)) goto err;			// frame end
+    	return ICXRead(xil + ICX_SLAVE_SPI_DAT);
+err:
+	ICXWrite(xil + ICX_SLAVE_SPI_CSR, 0);
+	return -1;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Write ADC chip 8-bit registers via SPI
+//	num - 0-15 ADC chip number
+//	addr - register address
+//	val - value to be written
+//	return 0 if OK, negative on error.
+int uwfd64::ADCWrite(int num, int addr, int val)
+{
+    	int xil;
+
+    	xil = ICX_SLAVE_STEP * ((num >> 2) & 3);
+    	if (ICXWrite(xil + ICX_SLAVE_SPI_CSR, SPI_CSR_CS << (num & 3))) goto err;	// frame begin
+    	if (ICXWrite(xil + ICX_SLAVE_SPI_DAT, (addr >> 8) & 0x7F)) goto err;
+    	if (ICXWrite(xil + ICX_SLAVE_SPI_DAT, addr & 0xFF)) goto err;
+    	if (ICXWrite(xil + ICX_SLAVE_SPI_DAT, val & 0xFF)) goto err;
+    	if (ICXWrite(xil + ICX_SLAVE_SPI_CSR, 0)) goto err;			// frame end
+    	return 0;
+err:
+	ICXWrite(xil + ICX_SLAVE_SPI_CSR, 0);
+	return -1;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //	Configure Master clock multiplexer CDCUN1208LP
 //	sel - input clock select: 0 - internal, 1 - external
 //	div - input clock divider: 0 - 1, 1 - 2, 2 - 4, 3 - 8.
@@ -69,6 +113,20 @@ int uwfd64::DACSet(int val)
 fin:
 	a32->dac.csr = 0;			// Deselect
 	return (i == SPI_TIMEOUT) ? -10 : 0;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Read ADC ID : regs 1 and 2.
+//	num - ADC number (1-15)
+//	Return 16-bit value ID:GRADE if OK, -10 on error
+int uwfd64::GetADCID(int num)
+{
+	int id, grade;
+	id = ADCRead(num, ADC_REG_ID);
+	if (id < 0) return id;
+	grade = ADCRead(num, ADC_REG_GRADE);
+	if (grade < 0) return grade;
+	return (id << 8) + grade;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -218,6 +276,12 @@ int uwfd64::Init(void)
 	ConfigureMasterClock(0, 0, 0);	// internal clock, no divider.
 	// Set DAC to middle range
 	if(DACSet(0x2000)) errcnt++;
+	// Set I2C on slave Xilinxes
+	for (i=0; i<4; i++) {
+		ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_I2C_PRCL, I2C_PRESC & 0xFF);
+		ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_I2C_PRCH, (I2C_PRESC >> 8) & 0xFF);
+		ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_I2C_CTR, I2C_CTR_CORE_ENABLE);
+	}
 	return errcnt;
 }
 
@@ -243,6 +307,70 @@ int uwfd64::IsHere(void)
 	
 	rc = (a16->snum >> 8) & 0xFF;
 	return (rc == serial);
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Read Si5338 via I2C
+//	num - slave Xilinx address
+//	addr - register
+//	Return 16-bit value if OK, -10 on error
+int uwfd64::L2CRead(int num, int addr)
+{
+	int i;
+	int val;
+
+	// send chip address
+	if (ICXWrite(ICX_SLAVE_STEP * (num & 3) + ICX_SLAVE_I2C_DAT, SI5338_ADDR)) goto err;;
+	if (ICXWrite(ICX_SLAVE_STEP * (num & 3) + ICX_SLAVE_I2C_CSR, I2C_SR_START + I2C_SR_WRITE)) goto err;
+    	for (i = 0; i < L2C_TIMEOUT; i++) if (!(ICXRead(ICX_SLAVE_STEP * (num & 3) + ICX_SLAVE_I2C_CSR) & I2C_SR_TRANSFER_IN_PRG)) break;
+	if (i == L2C_TIMEOUT) goto err;
+	// send register address
+	if (ICXWrite(ICX_SLAVE_STEP * (num & 3) + ICX_SLAVE_I2C_DAT, addr & 0x7F)) goto err;;
+	if (ICXWrite(ICX_SLAVE_STEP * (num & 3) + ICX_SLAVE_I2C_CSR, I2C_SR_WRITE + I2C_SR_STOP)) goto err;
+    	for (i = 0; i < L2C_TIMEOUT; i++) if (!(ICXRead(ICX_SLAVE_STEP * (num & 3) + ICX_SLAVE_I2C_CSR) & I2C_SR_TRANSFER_IN_PRG)) break;
+	if (i == L2C_TIMEOUT) goto err;
+	// send chip address again with direction bit
+	if (ICXWrite(ICX_SLAVE_STEP * (num & 3) + ICX_SLAVE_I2C_DAT, SI5338_ADDR + I2C_DAT_DDIR)) goto err;;
+	if (ICXWrite(ICX_SLAVE_STEP * (num & 3) + ICX_SLAVE_I2C_CSR, I2C_SR_START + I2C_SR_WRITE)) goto err;
+    	for (i = 0; i < L2C_TIMEOUT; i++) if (!(ICXRead(ICX_SLAVE_STEP * (num & 3) + ICX_SLAVE_I2C_CSR) & I2C_SR_TRANSFER_IN_PRG)) break;
+	if (i == L2C_TIMEOUT) goto err;
+	// get data byte
+	if (ICXWrite(ICX_SLAVE_STEP * (num & 3) + ICX_SLAVE_I2C_CSR, I2C_SR_READ + I2C_SR_STOP + I2C_SR_ACK)) goto err;
+    	for (i = 0; i < L2C_TIMEOUT; i++) if (!(ICXRead(ICX_SLAVE_STEP * (num & 3) + ICX_SLAVE_I2C_CSR) & I2C_SR_TRANSFER_IN_PRG)) break;
+	if (i == L2C_TIMEOUT) goto err;
+	return ICXRead(ICX_SLAVE_STEP * (num & 3) + ICX_SLAVE_I2C_DAT);
+err:
+	ICXWrite(ICX_SLAVE_STEP * (num & 3) + ICX_SLAVE_I2C_CSR, I2C_SR_STOP);
+	return -10;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Write Si5338 via I2C
+//	num - slave Xilinx address
+//	addr - register
+//	Return 0, -10 on error
+int uwfd64::L2CWrite(int num, int addr, int val)
+{
+	int i;
+	// send chip address
+	if (ICXWrite(ICX_SLAVE_STEP * (num & 3) + ICX_SLAVE_I2C_DAT, SI5338_ADDR)) goto err;;
+	if (ICXWrite(ICX_SLAVE_STEP * (num & 3) + ICX_SLAVE_I2C_CSR, I2C_SR_START + I2C_SR_WRITE)) goto err;
+    	for (i = 0; i < L2C_TIMEOUT; i++) if (!(ICXRead(ICX_SLAVE_STEP * (num & 3) + ICX_SLAVE_I2C_CSR) & I2C_SR_TRANSFER_IN_PRG)) break;
+	if (i == L2C_TIMEOUT) goto err;
+	// send register address
+	if (ICXWrite(ICX_SLAVE_STEP * (num & 3) + ICX_SLAVE_I2C_DAT, addr & 0x7F)) goto err;;
+	if (ICXWrite(ICX_SLAVE_STEP * (num & 3) + ICX_SLAVE_I2C_CSR, I2C_SR_WRITE)) goto err;
+    	for (i = 0; i < L2C_TIMEOUT; i++) if (!(ICXRead(ICX_SLAVE_STEP * (num & 3) + ICX_SLAVE_I2C_CSR) & I2C_SR_TRANSFER_IN_PRG)) break;
+	if (i == L2C_TIMEOUT) goto err;
+	// send data byte
+	if (ICXWrite(ICX_SLAVE_STEP * (num & 3) + ICX_SLAVE_I2C_DAT, val & 0xFF)) goto err;;
+	if (ICXWrite(ICX_SLAVE_STEP * (num & 3) + ICX_SLAVE_I2C_CSR, I2C_SR_WRITE + I2C_SR_STOP)) goto err;
+    	for (i = 0; i < L2C_TIMEOUT; i++) if (!(ICXRead(ICX_SLAVE_STEP * (num & 3) + ICX_SLAVE_I2C_CSR) & I2C_SR_TRANSFER_IN_PRG)) break;
+	if (i == L2C_TIMEOUT) goto err;
+	return 0;
+err:
+	ICXWrite(ICX_SLAVE_STEP * (num & 3) + ICX_SLAVE_I2C_CSR, I2C_SR_STOP);
+	return -10;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -299,26 +427,31 @@ void uwfd64::Reset(void)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//	Write/read random number test of the SDRAM memory
-//	cnt - amount of memory in Mbytes to test
-//	Return number of errors. Negative number is returned on access error.
-int uwfd64::TestMem(int cnt)
+//	Configure Si5338
+//	num - slave Xilinx number
+//	fname - Si5338 text configuration file
+//	Return 0 on OK, negative on error.
+int uwfd64::Si5338Configure(int num, char *fname)
 {
-	int irc;
-	int errcnt;
-	int i, j;
-	int seed, rseed;
-	int *buf;
-	unsigned long long vme_addr;
-	
-	buf = (int *) malloc(MBYTE / sizeof(int));
-	seed = time(NULL);
-	
-	for (i = 0; i < cnt; i++) {
-		
+
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Write/read random number test of the ADC user pattern 1 LSB register
+//	cnt - repeat counter
+//	Return number of errors
+int uwfd64::TestADCReg(int cnt)
+{
+	int i, j, r, w, errcnt;
+	errcnt = 0;
+	srand48(time(NULL));
+	for (i=0; i < cnt; i++) for (j=0; j<15; j++) {
+		w = mrand48() & 0xFF;
+		ADCWrite(j, ADC_REG_PAT1L, w);
+		r = ADCRead(j, ADC_REG_PAT1L) & 0xFF;
+		if (w != r) errcnt++;
 	}
-	
-	free(buf);
+	return errcnt;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -334,6 +467,75 @@ int uwfd64::TestReg32(int cnt)
 		w = mrand48();
 		a32->ver.out = w;
 		r = a32->ver.out;
+		if (w != r) errcnt++;
+	}
+	return errcnt;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Write/read random number test of the SDRAM memory
+//	cnt - amount of memory in Mbytes to test
+//	Return number of errors. Negative number is returned on access error.
+int uwfd64::TestSDRAM(int cnt)
+{
+	int irc;
+	int errcnt;
+	int i, j, k, m;
+	int seed;
+	unsigned int *buf;
+	unsigned long long vme_addr;
+	
+	buf = (unsigned int *) malloc(MBYTE);
+	if (!buf) return -1;
+	errcnt = 0;	
+	for (i = 0; i < cnt; i += j) {	// cycle over passes
+		j = cnt - i;
+		if (j > MEMSIZE/MBYTE) j = MEMSIZE/MBYTE;
+		seed = time(NULL);
+		// writing
+		srand48(seed);
+		vme_addr = GetBase64();
+		for (k = 0; k < j; k++) {
+			for(m = 0; m < MBYTE / sizeof(int); m++) buf[m] = mrand48();
+			irc = vmemap_a64_blkwrite(A64UNIT, vme_addr, buf, MBYTE);
+//			printf("Writing: i=%d j=%d k=%d irc=%d\n", i, j, k, irc);
+			if (irc) {
+				free(buf);
+				return -1;
+			}
+			vme_addr += MBYTE;
+		}
+		// reading
+		srand48(seed);
+		vme_addr = GetBase64();
+		for (k = 0; k < j; k++) {
+			irc = vmemap_a64_blkread(A64UNIT, vme_addr, buf, MBYTE);
+//			printf("Reading: i=%d j=%d k=%d irc=%d\n", i, j, k, irc);
+			if (irc) {
+				free(buf);
+				return -1;
+			}
+			for(m = 0; m < MBYTE / sizeof(int); m++) if (buf[m] != mrand48()) errcnt++;
+			vme_addr += MBYTE;
+		}
+	}
+	free(buf);
+	return errcnt;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Write/read random number test of the dedicated test register in slave Xilinxes
+//	cnt - repeat counter
+//	Return number of errors
+int uwfd64::TestSlaveReg16(int cnt)
+{
+	int i, j, r, w, errcnt;
+	errcnt = 0;
+	srand48(time(NULL));
+	for (i=0; i < cnt; i++) for (j=0; j<3; j++) {
+		w = mrand48() & 0xFFFF;
+		ICXWrite(ICX_SLAVE_STEP * j + ICX_SLAVE_VER_OUT, w);
+		r = ICXRead(ICX_SLAVE_STEP * j + ICX_SLAVE_VER_OUT) & 0xFFFF;
 		if (w != r) errcnt++;
 	}
 	return errcnt;
