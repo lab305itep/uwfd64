@@ -24,10 +24,13 @@ private:
 public:
 	uwfd64_tool(void);
 	~uwfd64_tool(void);
+	void A16Dump(int addr, int len);
 	void A16Read(int addr);
 	void A16Write(int addr, int val);
+	void A32Dump(int addr, int len);
 	void A32Read(int addr);
 	void A32Write(int addr, int val);
+	void A64Dump(long long addr, int len);
 	void A64Read(long long addr);
 	void A64Write(long long addr, int val);
 	void ADCRead(int serial, int num, int addr);	
@@ -73,9 +76,24 @@ uwfd64_tool::~uwfd64_tool(void)
 	if (a32) vmemap_close(a32);
 }
 
+void uwfd64_tool::A16Dump(int addr, int len)
+{
+	int i;
+	if (addr + len > 0x100 * A16STEP) {
+		printf("Address 0x%X is out of range: 0 - 0x%X\n", addr + len, 0x100 * A16STEP);
+	} else {
+		for (i = 0; i < len; i += 2) {
+			if (!(i & 0x1E)) printf("A16[0xA000 + 0x%X]: ", addr + i);
+			printf("%4.4X ", a16[(addr + i) / 2]);
+			if ((i & 0x1E) == 0x1E) printf("\n");
+		}
+		if (i & 0x1E) printf("\n");
+	}
+}
+
 void uwfd64_tool::A16Read(int addr)
 {
-	if (addr > 0x100 * A16STEP - 4) {
+	if (addr > 0x100 * A16STEP - 2) {
 		printf("Address 0x%X is out of range: 0 - 0x%X\n", addr, 0x100 * A16STEP - 4);
 	} else {
 		printf("A16[0xA000 + 0x%X] = %X\n", addr, a16[addr/2]);
@@ -84,10 +102,25 @@ void uwfd64_tool::A16Read(int addr)
 
 void uwfd64_tool::A16Write(int addr, int val)
 {
-	if (addr > 0x100 * A16STEP - 4) {
+	if (addr > 0x100 * A16STEP - 2) {
 		printf("Address 0x%X is out of range: 0 - 0x%X\n", addr, 0x100 * A16STEP - 4);
 	} else {
 		a16[addr/2] = val;
+	}
+}
+
+void uwfd64_tool::A32Dump(int addr, int len)
+{
+	int i;
+	if (addr + len > 0x100 * A32STEP) {
+		printf("Address 0x%X is out of range: 0 - 0x%X\n", addr + len, 0x100 * A32STEP);
+	} else {
+		for (i = 0; i < len; i += 4) {
+			if (!(i & 0x1C)) printf("A32[0xAA000000 + 0x%X]: ", addr + i);
+			printf("%8.8X ", a32[(addr + i) / 4]);
+			if ((i & 0x1C) == 0x1C) printf("\n");
+		}
+		if (i & 0x1C) printf("\n");
 	}
 }
 
@@ -107,6 +140,31 @@ void uwfd64_tool::A32Write(int addr, int val)
 	} else {
 		a32[addr/4] = val;
 	}
+}
+
+void uwfd64_tool::A64Dump(long long addr, int len)
+{
+	int i;
+	unsigned int *buf;
+	if (addr + len > 0x100 * A64STEP) {
+		printf("Address 0x%LX is out of range: 0 - 0x%LX\n", addr + len, 0x100 * A64STEP);
+		return;
+	}
+	buf = (unsigned int *)malloc(len);
+	if (!buf) {
+		printf("No memory.\n");
+		return;
+	}
+	if (vmemap_a64_blkread(A64UNIT, A64BASE + addr, buf, len)) {
+		printf("Read error.\n");
+		return;
+	}
+	for (i = 0; i < len; i += 4) {
+		if (!(i & 0x1C)) printf("A64[0xAAAAAA00_00000000 + 0x%LX]: ", addr + i);
+		printf("%8.8X ", buf[i / 4]);
+		if ((i & 0x1C) == 0x1C) printf("\n");
+	}
+	if (i & 0x1C) printf("\n");
 }
 
 void uwfd64_tool::A64Read(long long addr)
@@ -196,6 +254,10 @@ int uwfd64_tool::DoTest(uwfd64 *ptr, int type, int cnt)
 		break;
 	case 4:
 		irc = ptr->TestADCReg(cnt);
+		break;
+	case 5:		
+		irc = 0;
+		for (i=0; i<cnt; i++) irc += ptr->ConfigureSlaveClock(i & 3, "Si5338-125MHz.h");
 		break;
 	default:
 		irc = -10;
@@ -410,6 +472,9 @@ void Help(void)
 	printf("B addr [data] - read/write VME A32 (address is counted from 0xAA000000);\n");
 	printf("C addr [data] - read/write VME A64 (address is counted from 0xAAAAAA00_00000000);\n");
 	printf("D num|* val - set common baseline DAC to val;\n");
+	printf("E addr [len] - dump VME A16 (address is counted from 0xA000);\n");
+	printf("F addr [len] - dump VME A32 (address is counted from 0xAA000000);\n");
+	printf("G addr [len] - dump VME A64 (address is counted from 0xAAAAAA00_00000000);\n");
 	printf("H - print this Help;\n");
 	printf("I num|* - Init;\n");
 	printf("L - List modules found;\n");
@@ -421,8 +486,9 @@ void Help(void)
 	printf("\t0 - write/read 32-bit register with random numbers;\n");
 	printf("\t1 - configure and read back master clock multiplexer TI CDCUN1208LP;\n");
 	printf("\t2 - test SDRAM;\n");
-	printf("\t3 - write/read 16-bit register in slave Xilinxex with random numbers;\n");
+	printf("\t3 - write/read 16-bit register in slave Xilinxes with random numbers;\n");
 	printf("\t4 - write/read 8-bit pattern 1 LSB register in ADCs with random numbers;\n");
+	printf("\t5 - configure and read back slave clock controller SiLabs Si5338.\n");
 	printf("U num|* addr [data] - read/write 16-bit word to clock CDCUN1208LP chip using I2C;\n");
 	printf("X num|* addr [data] - send/receive data from slave Xilinxes via SPI. addr - SPI address.\n");
 }
@@ -504,6 +570,39 @@ int Process(char *cmd, uwfd64_tool *tool)
 		}
 		ival = strtol(tok, NULL, 0);
 		tool->DACSet(serial, ival);
+		break;
+	case 'E':	// A16 dump
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need address.\n");
+	    		Help();
+	    		break;
+		}
+		addr = strtol(tok, NULL, 0);
+		tok = strtok(NULL, DELIM);
+		tool->A16Dump(addr, (tok) ? strtol(tok, NULL, 0) : 0x10);
+		break;
+	case 'F':	// A32 dump
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need address.\n");
+	    		Help();
+	    		break;
+		}
+		addr = strtol(tok, NULL, 0);
+		tok = strtok(NULL, DELIM);
+		tool->A32Dump(addr, (tok) ? strtol(tok, NULL, 0) : 0x400);
+		break;
+	case 'G':	// A64 dump
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need address.\n");
+	    		Help();
+	    		break;
+		}
+		laddr = strtoll(tok, NULL, 0);
+		tok = strtok(NULL, DELIM);
+		tool->A64Dump(laddr, (tok) ? strtol(tok, NULL, 0) : 0x400);
 		break;
 	case 'H':	// Help
         	Help();

@@ -100,7 +100,7 @@ struct uwfd64_i2c_reg {
 	volatile unsigned int reserved[3];
 };
 
-#define I2C_TIMEOUT		200
+#define I2C_TIMEOUT		500
 #define I2C_PRESC               0xC0
 
 #define I2C_CTR_CORE_ENABLE     0x80
@@ -126,16 +126,25 @@ struct uwfd64_i2c_reg {
 #define I2C_SR_TRANSFER_IN_PRG  0x02
 #define I2C_SR_IRQ_FLAG         0x01
 
+//      Registers:      (bits not mentioned are not used)
 //              0:      CSR (RW)
-//                              CSR31   Recieve FIFO enable/reset, when 0 fifos do not accept data and
-//                                              no arbitration is performed, at rising edge all pointers are initialized
-//                              CSR30   Full reset of the module (MCB, WBRAM fsm, FIFOs) -- auto cleared
-//                              CSR29   MCB and WBRAM fsm reset -- auto cleared
-//                              CSR28   enable debug, when 1 WADR reads debug lines rather than last written block addr
-//                              CSR7    SDRAM GTP area full -  no more blocks can be written from GTP
-//                              CSR6    SDRAM GTP area emty -  no new data available for read
-//                              CSR4    OR of CSR[3:0]
-//                              CSR[3:0] (sticky) Recieve FIFO 3-0 overflow - packet missed, only cleared by asserting CSR30
+//                              CSR31   (RW)    Recieve FIFO enable/reset, when 0 fifos do not accept data and
+//                                              no arbitration is performed, all pointers are kept initialized
+//                              CSR30   (RWC) Full reset of the module (MCB, WBRAM fsm, FIFOs) -- auto cleared
+//                              CSR29   (RWC) MCB and WBRAM fsm reset -- auto cleared
+//                              CSR28   (RW)  enable debug, when 1 WADR reads debug lines rather than last written block addr
+//                              CSR[23:20] (R)  same as CSR[7:4] for fifo 4
+//                              CSR[19:16] (R)  same as CSR[7:4] for fifo 3
+//                              CSR[15:12] (R)  same as CSR[7:4] for fifo 2
+//                              CSR[11:8]  (R)  same as CSR[7:4] for fifo 1
+//                              CSR7    (R)     (sticky) fifo 0 underrun error: CW recieved when not expected
+//                              CSR6    (R)     (sticky) fifo 0 overrun error: no CW recieved when expected
+//                              CSR5    (R)     (sticky) fifo 0 missed a block because it's full
+//                              CSR4    (R)     fifo 0 empty
+//                              CSR3    (R)     arbitter underrun error: CW recieved earlier than expected, RECIEVING STOPPED
+//                              CSR2    (R)     arbitter overrunrun error: no CW recieved when expected, RECIEVING STOPPED
+//                              CSR1    (R)   SDRAM GTP area full -  no more blocks can be written from GTP
+//                              CSR0    (R)   SDRAM GTP area emty -  no new data available for read
 //
 //              4:              RADR    (RW)
 //                              RADR[28:2]      must be set by readout procedure to indicate the last physical address that was already read by it
@@ -144,12 +153,13 @@ struct uwfd64_i2c_reg {
 //              8:              LIMR    (RW)
 //                              LIMR[31:16]     upper 16bit of the address of the first 8K block following the recieving area
 //                              LIMR[15:0]      upper 16bit of the address of the first 8K block of the recieving area
+//                              writing to this reg must be done when fifo is disabled with CSR31=0, otherwise writing is ignored
 //
 //              C:              WADR    (R)
 //                              WADR[28:2]      physical addres of the first free cell after recieved block is written
 //                              WADR[1:0]       always reads 00
 //
-//                              with CSR28=1 reads debug lines as indicated below
+//                              with CSR28=1 reads debug lines as indicated in memory.v
 
 struct uwfd64_fifo_reg {
 	volatile unsigned int csr;
@@ -158,14 +168,15 @@ struct uwfd64_fifo_reg {
 	volatile unsigned int wptr;
 };
 
-#define FIFO_CSR_COVF	   0
-#define FIFO_CSR_OVF    0x10
-#define FIFO_CSR_EMPTY  0x40
-#define FIFO_CSR_FULL   0x80
-#define FIFO_CSR_DEBUG  0x10000000
-#define FIFO_CSR_SRESET 0x20000000
-#define FIFO_CSR_HRESET 0x40000000
-#define FIFO_CSR_ENABLE 0x80000000
+#define FIFO_CSR_EMPTY		1
+#define FIFO_CSR_FULL   	2 
+#define FIFO_CSR_OVERRUN	4
+#define FIFO_CSR_UNDERRUN	8
+#define FIFO_CSR_SHIFT		4
+#define FIFO_CSR_DEBUG  	0x10000000
+#define FIFO_CSR_SRESET 	0x20000000
+#define FIFO_CSR_HRESET 	0x40000000
+#define FIFO_CSR_ENABLE 	0x80000000
 
 struct uwfd64_a32_reg {
 	struct uwfd64_inout_reg csr;	// CSR
@@ -349,7 +360,55 @@ struct uwfd64_a32_reg {
 #define ADC_SYNC_ENABLE		2
 #define ADC_REG_NEXTONLY	1
 
+
+// Si5338 registers
 #define SI5338_ADDR		0xE0
+
+#define SI5338_REG_FCALOVRL	45
+#define SI5338_REG_FCALOVRM	46
+#define SI5338_REG_FCALOVRH	47
+#define SI5338_FCALOVRH_CONST	0x14
+
+#define SI5338_REG_CTRL		49
+#define SI5338_CTRL_FCALOVR	0x80
+#define SI5338_CTRL_VCOGAIN	0x10
+#define SI5338_CTRL_RSEL	4
+#define SI5338_CTRL_BWSEL	1
+
+#define SI5338_REG_STATUS	218
+#define SI5338_STATUS_LOL	0x10
+#define SI5338_STATUS_FDBK	8
+#define SI5338_STATUS_CLKIN	4
+#define SI5338_STATUS_SYSCAL	1
+
+#define SI5338_REG_RESET	226
+#define SI5338_RESET_MS		4
+
+#define SI5338_REG_OUT		230
+#define SI5338_OUT_DISABLE_ALL	0x1F
+#define SI5338_OUT_DISABLE_G	0x10
+#define SI5338_OUT_DISABLE_D	8
+#define SI5338_OUT_DISABLE_C	4
+#define SI5338_OUT_DISABLE_B	2
+#define SI5338_OUT_DISABLE_A	1
+
+#define SI5338_REG_FCALL	235
+#define SI5338_REG_FCALM	236
+#define SI5338_REG_FCALH	237
+
+#define SI5338_REG_LOL		241
+#define SI5338_LOL_DISABLE	0x80
+#define SI5338_LOL_CONST	0x65
+
+#define SI5338_REG_SRESET	246
+#define SI5338_SRESET_RESET	2
+
+#define SI5338_REG_STKSTAT	247
+
+#define SI5338_REG_PAGE		255
+#define SI5338_PAGE_SEL		1
+
+#define SI5338_TIMEOUT		100
 
 class uwfd64 {
 private:
@@ -362,6 +421,7 @@ public:
 	int ADCRead(int num, int addr);
 	int ADCWrite(int num, int addr, int val);
 	int ConfigureMasterClock(int sel, int div, int erc = 0);
+	int ConfigureSlaveClock(int num, const char *fname);
 	int DACSet(int val);
 	int GetADCID(int num);
 	inline int GetBase16(void) { return A16BASE + serial * A16STEP; };
@@ -379,6 +439,8 @@ public:
 	int Init(void);
 	int IsHere(void);
 	int IsDone(int wait = 0);
+	int L2CBlkRead(int num, int addr, char *buf, int len);
+	int L2CBlkWrite(int num, int addr, char *buf, int len);
 	int L2CRead(int num, int addr);
 	int L2CWrite(int num, int addr, int val);
 	int Prog(char *fname = NULL);

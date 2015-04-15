@@ -3,4 +3,3 @@ uwfdtool: uwfdtool.o libvmemap.o uwfd64.o
 	
 clean:
 	-rm *.o uwfdtool
-
