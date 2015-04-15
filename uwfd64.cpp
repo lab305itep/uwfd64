@@ -14,10 +14,17 @@
 //	Constructor - only set addresses here
 uwfd64::uwfd64(int sernum, int gnum, unsigned short *space_a16, unsigned int *space_a32)
 {
+	int s, i;
+
 	serial = sernum;
 	ga = gnum;
 	a16 = (struct uwfd64_a16_reg *)((char *)space_a16 + serial * A16STEP);
 	a32 = (struct uwfd64_a32_reg *)((char *)space_a32 + ga * A32STEP);
+	// Set base address for A32 - emulate geographic and its parity
+	s = 0;
+	for (i=0; i<5; i++) if (ga & (1 << i)) s++;
+	s = 1 - (s & 1);
+	a16->c2x = (CPLD_C2X_RESET + ga * CPLD_C2X_GA + s * CPLD_C2X_PARITY) << 8;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -399,15 +406,10 @@ fin:
 //	Do module initialization.
 int uwfd64::Init(void)
 {
-	int i, s;
+	int i;
 	int errcnt;
 	
 	errcnt = 0;
-	// Set base address for A32 - emulate geographic and its parity
-	s = 0;
-	for (i=0; i<5; i++) if (ga & (1 << i)) s++;
-	s = 1 - (s & 1);
-	a16->c2x = (CPLD_C2X_RESET + ga * CPLD_C2X_GA + s * CPLD_C2X_PARITY) << 8;
 	// Init main CSR
 	a32->csr.out = 0;
 	Reset();
@@ -418,13 +420,25 @@ int uwfd64::Init(void)
 	ConfigureMasterClock(0, 0, 0);	// internal clock, no divider.
 	// Set DAC to middle range
 	if(DACSet(0x2000)) errcnt++;
+	// ADC power down
+	for (i=0; i<16; i++) if(ADCWrite(i, ADC_REG_PWR, ADC_PWR_DOWN)) errcnt++;
 	// Set I2C on slave Xilinxes
 	for (i=0; i<4; i++) {
-		ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_I2C_PRCL, I2C_PRESC & 0xFF);
-		ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_I2C_PRCH, (I2C_PRESC >> 8) & 0xFF);
-		ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_I2C_CTR, I2C_CTR_CORE_ENABLE);
-		ConfigureSlaveClock(i, "Si5338-125MHz.h");
+		if(ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_I2C_PRCL, I2C_PRESC & 0xFF)) errcnt++;
+		if(ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_I2C_PRCH, (I2C_PRESC >> 8) & 0xFF)) errcnt++;
+		if(ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_I2C_CTR, I2C_CTR_CORE_ENABLE)) errcnt++;
+		if(ConfigureSlaveClock(i, "Si5338-125MHz.h")) errcnt++;
 	}
+	// ADC power up
+	for (i=0; i<16; i++) if(ADCWrite(i, ADC_REG_PWR, 0)) errcnt++;
+	// ADC Reset
+	for (i=0; i<16; i++) if(ADCWrite(i, ADC_REG_CFG, ADC_CFG_RESET)) errcnt++;
+	// ADC output offset binary
+	for (i=0; i<16; i++) if(ADCWrite(i, ADC_REG_OUTPUT, 0)) errcnt++;
+	// Activate bitslip
+	for (i=0; i<4; i++) if(ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_CSR_OUT, SLAVE_CSR_BSDISABLE + SLAVE_CSR_BSRESET)) errcnt++;
+	for (i=0; i<4; i++) if(ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_CSR_OUT, SLAVE_CSR_BSDISABLE)) errcnt++;
+	for (i=0; i<4; i++) if(ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_CSR_OUT, 0)) errcnt++;
 	return errcnt;
 }
 

@@ -39,6 +39,7 @@ public:
 	void I2CRead(int serial, int addr);	
 	void I2CWrite(int serial, int addr, int ival);
 	inline int IsOK(void) { return a16 && a32; };
+	void ICXDump(int serial, int addr, int len);
 	void ICXRead(int serial, int addr);
 	void ICXWrite(int serial, int addr, int ival);
 	void Init(int serial = -1);
@@ -299,6 +300,30 @@ void uwfd64_tool::I2CWrite(int serial, int addr, int val)
 	}
 }
 
+void uwfd64_tool::ICXDump(int serial, int addr, int len)
+{
+	int i, j;
+	uwfd64 *ptr;
+	if (serial < 0) {
+		for (j=0; j<N; j++) {
+			for (i = 0; i < len; i++) {
+				if (!(i & 0xF)) printf("ICX[%3d:%X]: ", array[j]->GetSerial(), addr + i);
+				printf("%4.4X ", array[j]->ICXRead(addr + i) & 0xFFFF);
+				if ((i & 0xF) == 0xF) printf("\n");
+			}
+			if (i & 0xF) printf("\n");
+		}
+	} else {
+		ptr = FindSerial(serial);
+		for (i = 0; i < len; i++) {
+			if (!(i & 0xF)) printf("ICX[%3d:%X]: ", ptr->GetSerial(), addr + i);
+			printf("%4.4X ", ptr->ICXRead(addr + i) & 0xFFFF);
+			if ((i & 0xF) == 0xF) printf("\n");
+		}
+		if (i & 0xF) printf("\n");
+	}
+}
+
 void uwfd64_tool::ICXRead(int serial, int addr)
 {
 	int i;
@@ -477,6 +502,7 @@ void Help(void)
 	printf("G addr [len] - dump VME A64 (address is counted from 0xAAAAAA00_00000000);\n");
 	printf("H - print this Help;\n");
 	printf("I num|* - Init;\n");
+	printf("J num|* addr [len] - dump Slave Xilinxes 16-bit registers;\n");
 	printf("L - List modules found;\n");
 	printf("P num|* [filename.bin] - Program. Use filename.bin or just pulse prog pin;\n");
 	printf("Q - Quit;\n");
@@ -616,6 +642,25 @@ int Process(char *cmd, uwfd64_tool *tool)
 		}
 		serial = (tok[0] == '*') ? -1 : strtol(tok, NULL, 0);
 		tool->Init(serial);
+		break;
+	case 'J':	// ICX dump
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need module serial number or *.\n");
+	    		Help();
+	    		break;
+		}
+		serial = (tok[0] == '*') ? -1 : strtol(tok, NULL, 0);
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need start address.\n");
+	    		Help();
+	    		break;
+		}
+		addr = strtol(tok, NULL, 0);
+		tok = strtok(NULL, DELIM);
+		ival = (tok) ? strtol(tok, NULL, 0) : 0x10;
+		tool->ICXDump(serial, addr, ival);
 		break;
 	case 'L':	// List
         	tool->List();

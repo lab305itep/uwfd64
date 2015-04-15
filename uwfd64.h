@@ -44,6 +44,7 @@ struct uwfd64_a16_reg {
 #define CPLD_CSR_XINIT	0x40
 #define CPLD_CSR_XDONE	0x80
 #define CPLD_C2X_GA     1
+#define CPLD_C2X_GAMASK 0x1F
 #define CPLD_C2X_PARITY 0x20
 #define CPLD_C2X_RESET  0x80
 
@@ -62,6 +63,18 @@ struct uwfd64_inout_reg {
 };
 
 #define MAIN_CSR_RESET 0x80000000
+
+struct uwfd64_trig_reg {
+	volatile unsigned int csr;
+	volatile unsigned int cnt;
+};
+
+#define TRIG_CSR_CHANA	1
+#define TRIG_CSR_CHANB	2
+#define TRIG_CSR_CHANC	4
+#define TRIG_CSR_CHAND	8
+#define TRIG_CSR_EXT	0x10
+#define TRIG_CSR_SOFT	0x80
 
 struct uwfd64_spi_reg {
 	volatile unsigned int dat;	// only 2 low bytes used
@@ -180,7 +193,7 @@ struct uwfd64_fifo_reg {
 
 struct uwfd64_a32_reg {
 	struct uwfd64_inout_reg csr;	// CSR
-	struct uwfd64_inout_reg trig;	// Trigger production control
+	struct uwfd64_trig_reg trig;	// Trigger production control
 	struct uwfd64_spi_reg icx;	// inter Xilinx communication
 	struct uwfd64_spi_reg dac;	// comon level DAC
 	struct uwfd64_i2c_reg i2c;	// I2C master clock control (TI CDCUN1208LP)
@@ -244,6 +257,13 @@ struct uwfd64_a32_reg {
 #define ICX_SLAVE_I2C_CTR	10
 #define ICX_SLAVE_I2C_DAT	11
 #define ICX_SLAVE_I2C_CSR	12
+
+#define SLAVE_CSR_TMODE		1
+#define SLAVE_CSR_TLEN		0x10
+#define SLAVE_CSR_TSTART	0x80
+#define SLAVE_CSR_BSDISABLE	0x100
+#define SLAVE_CSR_BSRESET	0x200
+#define SLAVE_CSR_RAW		0x8000
 
 #define L2C_TIMEOUT		100
 
