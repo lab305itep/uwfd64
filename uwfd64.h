@@ -62,19 +62,95 @@ struct uwfd64_inout_reg {
 	volatile unsigned int out;
 };
 
+//              This is a CSR regiter, with main purpose to make commutations between
+//              CSR[2:0]  defines connection of trigger:
+//                      0 - I->I        internal trigger to channels
+//                      1 - I->FI       internal trigger to channels and front panel
+//                      2 - I->BI       internal trigger to channels and back panel
+//                      3 - I->FBI      internal trigger to channels, front and back panels
+//                      4 - F->I                front panel trigger to channels
+//                      5 - F->BI       front panel trigger to channels and back panel
+//                      6 - B->I                back panel trigger to channels
+//                      7 - B->FI       back panel trigger to channels and front panel
+//              CSR[3]   if 1, channels do not accept trigger
+//              CSR[6:4]  defines connection of INH similarly to trigger connections
+//              CSR[7]   if 1, channels are insensitive to INH
+//              CSR[10:8] defines connection of clocks similarly to trigger connections
+//                      in addition, programming of CDCUN required:
+//                      for modes 0-3 IN1 of CDCUN must be selected
+//                      for modes 4-7 IN2 of CDCUN must be selected
+//              CSR[11]  unused, some clocks are always on (if connected)
+//              CSR[31:12]      are general outputs to the upper hierarchy, CSR[31] is used for peripheral WB reset
+//              CSR+4 [31:0] are general inputs from the upper hierarchy, unused so far
+//
+
+struct uwfd64_csr_reg {
+	volatile unsigned int out;
+	volatile unsigned int in;
+};
+
+#define MAIN_MUX_I2I	0
+#define MAIN_MUX_I2FI	1
+#define MAIN_MUX_I2BI	2
+#define MAIN_MUX_I2FBI	3
+#define MAIN_MUX_F2I	4
+#define MAIN_MUX_F2BI	5
+#define MAIN_MUX_B2I	6
+#define MAIN_MUX_B2FI	7
+
+#define MAIN_CSR_TRG	1
+#define MAIN_CSR_BLKTRG	8
+#define MAIN_CSR_INH	0x10
+#define MAIN_CSR_BLKINH	0x80
+#define MAIN_CSR_CLK	0x100
 #define MAIN_CSR_RESET 0x80000000
+
+//	Trigger generation module
+//              Registers:
+//              0 CSR (RW):
+//                      3:0   - corrsponding chan FPGA trigger enable
+//                      6:4     - 1 + time in clocks to accumulate OR of all trigger sources
+//                      15:7  - 1 + trigger blocking time (125MHz ticks), actual blocking time 
+//                                              cannot be less than token transmission time 14*TOKEN_CLKDIV clocks
+//                      30:16 - user word to be put to the trigger block to memory
+//                      31              - inhibit, set on power on
+//              1 TRGCNT        (R) :
+//                      counts issued master triggers when not inhibited, 11 LSB are used as trigger token
+//                      any write to this register produced master soft trigger
+//              2 MISCNT        (R) :
+//                      counts triggers that appear during blocking time (when not inhibited)
+//              3 GTIME (R) :
+//                      middle bits of 45 bit global 125 MHz time counter. One time unit is 1.024 us.
+//                      Counting paused on active inhibit
+//                      Any write to GTIME or MISCNT cases reset of all 3 counters
+//
+//              Block sent to memory fifo
+//              0       10SC CCCL LLLL LLLL - S - soft trigger, CCCC - channel mask which produced the trigger, 
+//                                                                               L=7 - data length in 16-bit words not including CW 
+//      1       0ttt pnnn nnnn nnnn - ttt - trigger block type (3'b010 = 2 - trigger info block)
+//                                                                               n - 11-bit trigger token = trigger number LSB, p - token parity = NOT (xor n)
+//              2       0uuu uuuu uuuu uuuu - user word
+//              3       0 GTIME[14:0]             - lower GTIME
+//              4       0 GTIME[29:15]            - middle GTIME
+//              5       0 GTIME[44:30]            - higher GTIME
+//              6  0 TRIGCNT[14:0]        - lower trigger counter, 11 LSB coinside with token
+//              7  0 TRIGCNT[29:15]       - higher trigger counter
 
 struct uwfd64_trig_reg {
 	volatile unsigned int csr;
 	volatile unsigned int cnt;
+	volatile unsigned int miscnt;
+	volatile unsigned int gtime;
 };
 
 #define TRIG_CSR_CHANA	1
 #define TRIG_CSR_CHANB	2
 #define TRIG_CSR_CHANC	4
 #define TRIG_CSR_CHAND	8
-#define TRIG_CSR_EXT	0x10
-#define TRIG_CSR_SOFT	0x80
+#define TRIG_CSR_SRCOR	0x10
+#define TRIG_CSR_BLOCK	0x80
+#define TRIG_CSR_USER	0x10000
+#define TRIG_CSR_INHIBIT	0x800000000
 
 struct uwfd64_spi_reg {
 	volatile unsigned int dat;	// only 2 low bytes used
@@ -192,13 +268,13 @@ struct uwfd64_fifo_reg {
 #define FIFO_CSR_ENABLE 	0x80000000
 
 struct uwfd64_a32_reg {
-	struct uwfd64_inout_reg csr;	// CSR
+	struct uwfd64_csr_reg csr;	// CSR
+	struct uwfd64_inout_reg ver;	// Version & test register
 	struct uwfd64_trig_reg trig;	// Trigger production control
+	struct uwfd64_fifo_reg fifo;	// Memory fifo controller
 	struct uwfd64_spi_reg icx;	// inter Xilinx communication
 	struct uwfd64_spi_reg dac;	// comon level DAC
 	struct uwfd64_i2c_reg i2c;	// I2C master clock control (TI CDCUN1208LP)
-	struct uwfd64_fifo_reg fifo;	// Memory fifo controller
-	struct uwfd64_inout_reg ver;	// Version & test register
 };
 
 //	CDCUN1208LP definitions
