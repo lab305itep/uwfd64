@@ -3,6 +3,7 @@
 	Support UWFD64 modules. Test tool.
 */
 
+#include <libconfig.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
@@ -47,6 +48,7 @@ public:
 	void L2CWrite(int serial, int num, int addr, int ival);
 	void List(void);
 	void Prog(int serial = -1, char *fname = NULL);
+	void ReadConfig(char *fname);
 	void Test(int serial = -1, int type = 0, int cnt = 1000000);
 };
 
@@ -455,6 +457,10 @@ void uwfd64_tool::Prog(int serial, char *fname)
 	}
 }
 
+void uwfd64_tool::ReadConfig(char *fname)
+{
+}
+
 void uwfd64_tool::Test(int serial, int type, int cnt)
 {
 	int i;
@@ -501,7 +507,7 @@ void Help(void)
 	printf("F addr [len] - dump VME A32 (address is counted from 0xAA000000);\n");
 	printf("G addr [len] - dump VME A64 (address is counted from 0xAAAAAA00_00000000);\n");
 	printf("H - print this Help;\n");
-	printf("I num|* - Init;\n");
+	printf("I num|* [configfile] - Init, use current configuration or configfile if present;\n");
 	printf("J num|* addr [len] - dump Slave Xilinxes 16-bit registers;\n");
 	printf("L - List modules found;\n");
 	printf("P num|* [filename.bin] - Program. Use filename.bin or just pulse prog pin;\n");
@@ -641,6 +647,8 @@ int Process(char *cmd, uwfd64_tool *tool)
 	    		break;
 		}
 		serial = (tok[0] == '*') ? -1 : strtol(tok, NULL, 0);
+		tok = strtok(NULL, DELIM);
+		if (tok) tool->ReadConfig(tok);
 		tool->Init(serial);
 		break;
 	case 'J':	// ICX dump
