@@ -4,6 +4,10 @@
 */
 #ifndef UWFD64_H
 #define UWFD64_H
+
+#define MAX_PATH_LEN	1024
+
+//************************************************************************************************************************************************************************//
 //
 //					A16D16 space - CPLD. 
 //
@@ -48,6 +52,7 @@ struct uwfd64_a16_reg {
 #define CPLD_C2X_PARITY 0x20
 #define CPLD_C2X_RESET  0x80
 
+//************************************************************************************************************************************************************************//
 //
 //					A32D32 address space - module registers. 
 //
@@ -97,13 +102,14 @@ struct uwfd64_csr_reg {
 #define MAIN_MUX_F2BI	5
 #define MAIN_MUX_B2I	6
 #define MAIN_MUX_B2FI	7
+#define MAIN_MUX_MASK	7
 
 #define MAIN_CSR_TRG	1
 #define MAIN_CSR_BLKTRG	8
 #define MAIN_CSR_INH	0x10
 #define MAIN_CSR_BLKINH	0x80
 #define MAIN_CSR_CLK	0x100
-#define MAIN_CSR_RESET 0x80000000
+#define MAIN_CSR_RESET 0x80000000U
 
 //	Trigger generation module
 //              Registers:
@@ -143,14 +149,15 @@ struct uwfd64_trig_reg {
 	volatile unsigned int gtime;
 };
 
-#define TRIG_CSR_CHANA	1
-#define TRIG_CSR_CHANB	2
-#define TRIG_CSR_CHANC	4
-#define TRIG_CSR_CHAND	8
+#define TRIG_CSR_CHAN	1
+#define TRIG_CSR_CHAN_MASK	0xF
 #define TRIG_CSR_SRCOR	0x10
+#define TRIG_CSR_SRCOR_MASK	0x7F0
 #define TRIG_CSR_BLOCK	0x80
+#define TRIG_CSR_BLOCK_MASK	0xFF80
 #define TRIG_CSR_USER	0x10000
-#define TRIG_CSR_INHIBIT	0x800000000
+#define TRIG_CSR_USER_MASK	0x7FFF0000
+#define TRIG_CSR_INHIBIT	0x80000000U
 
 struct uwfd64_spi_reg {
 	volatile unsigned int dat;	// only 2 low bytes used
@@ -312,6 +319,8 @@ struct uwfd64_a32_reg {
 #define CDCUN_CTRL_RESET	2
 #define CDCUN_CTRL_PWRDN	1
 
+//************************************************************************************************************************************************************************//
+//
 //	A64D32/D64 address space - module SDRAM. Hardware byte swap.
 //	Module address space is max 4 GByte at AAAAAA00_00000000 + (GADDR << 32)
 #define A64BASE 0xAAAAAA0000000000ULL
@@ -320,7 +329,10 @@ struct uwfd64_a32_reg {
 #define MEMSIZE 0x20000000	// bytes
 #define MBYTE   0x100000
 
+//************************************************************************************************************************************************************************//
+//
 //	Slave Xilinxes address map
+//
 #define ICX_SLAVE_STEP		0x2000
 #define ICX_SLAVE_CSR_IN	0
 #define ICX_SLAVE_CSR_OUT	1
@@ -506,12 +518,33 @@ struct uwfd64_a32_reg {
 
 #define SI5338_TIMEOUT		100
 
+//************************************************************************************************************************************************************************//
+struct uwfd64_module_config {
+	int MasterClockMux;	// master clock multiplexer setting 
+	int MasterTrigMux;	// master trigger multiplexer setting 
+	int MasterInhMux;	// master inhibit multiplexer setting
+	int MasterClockDiv;	// Mater clock divider (0 - 1, 1 - 2, 2 - 4, 3 - 8)
+	int MasterClockErc;	// Mater clock edge control (0 - fast, 1 - medium, 2 - slow)
+	char SlaveClockFile[MAX_PATH_LEN];	// Si5338 .h configuration file
+	int DAC;		// DAC setting
+	int TrigGenMask;	// Mask of slave xilinxes participating in trigger generation
+	int TrigOrTime;		// Number of clocks to OR trigger sources
+	int TrigBlkTime;	// Number of clocks to block trigger production
+	int TrigUserWord;	// 15-bit user word to be put to trigger block
+	int FifoBegin;		// Main FIFO start address in 8k blocks
+	int FifoEnd;		// Main FIFO end address in 8k blocks
+};
+
+//************************************************************************************************************************************************************************//
+class uwfd64_tool;
+
 class uwfd64 {
 private:
 	int serial;
 	int ga;
 	struct uwfd64_a16_reg *a16;
 	struct uwfd64_a32_reg *a32;
+	struct uwfd64_module_config Conf;
 public:
 	uwfd64(int sernum, int gnum, unsigned short *space_a16, unsigned int *space_a32);
 	int ADCRead(int num, int addr);
@@ -541,12 +574,15 @@ public:
 	int L2CWrite(int num, int addr, int val);
 	int Prog(char *fname = NULL);
 	void Reset(void);
-	int Si5338Configure(int num, char *fname);
 	int TestADCReg(int cnt);
 	int TestReg32(int cnt);
 	int TestSDRAM(int cnt);
 	int TestSlaveReg16(int cnt);
+
+	friend class uwfd64_tool;
 };
+
+
 
 #endif /* UWFD64_H */
 

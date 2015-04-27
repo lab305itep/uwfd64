@@ -1,5 +1,5 @@
 uwfdtool: uwfdtool.o libvmemap.o uwfd64.o
-	g++ $^ -o $@ -lreadline
+	g++ $^ -o $@ -lreadline -lconfig
 
 uwfd64.o: uwfd64.cpp uwfd64.h libvmemap.h
 

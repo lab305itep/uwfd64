@@ -20,6 +20,9 @@ uwfd64::uwfd64(int sernum, int gnum, unsigned short *space_a16, unsigned int *sp
 	ga = gnum;
 	a16 = (struct uwfd64_a16_reg *)((char *)space_a16 + serial * A16STEP);
 	a32 = (struct uwfd64_a32_reg *)((char *)space_a32 + ga * A32STEP);
+	// initial configuration - empty
+	memset(&Conf, 0, sizeof(Conf));
+	Conf.FifoEnd = 1;	// minimum FIFO size of 8kBytes
 	// Set base address for A32 - emulate geographic and its parity
 	s = 0;
 	for (i=0; i<5; i++) if (ga & (1 << i)) s++;
@@ -410,16 +413,24 @@ int uwfd64::Init(void)
 	int errcnt;
 	
 	errcnt = 0;
-	// Init main CSR
-	a32->csr.out = 0;
-	Reset();
 	// Setup I2C on main xilinx
 	a32->i2c.presc[0] = I2C_PRESC & 0xFF;
 	a32->i2c.presc[1] = (I2C_PRESC >> 8) & 0xFF;
 	a32->i2c.ctr = I2C_CTR_CORE_ENABLE;
-	ConfigureMasterClock(0, 0, 0);	// internal clock, no divider.
+	ConfigureMasterClock((Conf.MasterClockDiv & 4) ? 1 : 0, Conf.MasterClockDiv, Conf.MasterClockErc);
+	// Init main CSR
+	a32->csr.out = MAIN_CSR_TRG * (Conf.MasterTrigMux & MAIN_MUX_MASK) + 
+		MAIN_CSR_INH * (Conf.MasterInhMux & MAIN_MUX_MASK) + MAIN_CSR_CLK * (Conf.MasterClockMux & MAIN_MUX_MASK);
+	Reset();
+	// Init Main trigger source
+	a32->trig.csr = TRIG_CSR_INHIBIT + ((TRIG_CSR_USER * Conf.TrigUserWord) & TRIG_CSR_USER_MASK) + ((TRIG_CSR_BLOCK * Conf.TrigBlkTime) & TRIG_CSR_BLOCK_MASK) 
+		+ ((TRIG_CSR_SRCOR * Conf.TrigOrTime) & TRIG_CSR_SRCOR_MASK) + ((TRIG_CSR_CHAN * Conf.TrigGenMask) & TRIG_CSR_CHAN_MASK);
+	a32->trig.gtime = 0;	// reset counters
+	// Init SDRAM FIFO
+	a32->fifo.csr = FIFO_CSR_HRESET;
+	a32->fifo.win = (Conf.FifoBegin & 0xFFFF) + ((Conf.FifoEnd & 0xFFFF) << 16);
 	// Set DAC to middle range
-	if(DACSet(0x2000)) errcnt++;
+	if(DACSet(Conf.DAC)) errcnt++;
 	// ADC power down
 	for (i=0; i<16; i++) if(ADCWrite(i, ADC_REG_PWR, ADC_PWR_DOWN)) errcnt++;
 	// Set I2C on slave Xilinxes
@@ -427,7 +438,7 @@ int uwfd64::Init(void)
 		if(ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_I2C_PRCL, I2C_PRESC & 0xFF)) errcnt++;
 		if(ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_I2C_PRCH, (I2C_PRESC >> 8) & 0xFF)) errcnt++;
 		if(ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_I2C_CTR, I2C_CTR_CORE_ENABLE)) errcnt++;
-		if(ConfigureSlaveClock(i, "Si5338-125MHz.h")) errcnt++;
+		if(ConfigureSlaveClock(i, Conf.SlaveClockFile)) errcnt++;
 	}
 	// ADC power up
 	for (i=0; i<16; i++) if(ADCWrite(i, ADC_REG_PWR, 0)) errcnt++;
@@ -666,16 +677,6 @@ void uwfd64::Reset(void)
 {
 	a32->csr.out |= MAIN_CSR_RESET;
 	a32->csr.out &= ~MAIN_CSR_RESET;
-}
-
-////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//	Configure Si5338
-//	num - slave Xilinx number
-//	fname - Si5338 text configuration file
-//	Return 0 on OK, negative on error.
-int uwfd64::Si5338Configure(int num, char *fname)
-{
-
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
