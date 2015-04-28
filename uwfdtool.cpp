@@ -4,6 +4,7 @@
 */
 
 #include <libconfig.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
@@ -43,12 +44,14 @@ public:
 	void ICXDump(int serial, int addr, int len);
 	void ICXRead(int serial, int addr);
 	void ICXWrite(int serial, int addr, int ival);
+	void Inhibit(int serial, int what);
 	void Init(int serial = -1);
 	void L2CRead(int serial, int num, int addr);	
 	void L2CWrite(int serial, int num, int addr, int ival);
 	void List(void);
 	void Prog(int serial = -1, char *fname = NULL);
 	void ReadConfig(char *fname);
+	void SoftTrigger(int serial, int freq);
 	void Test(int serial = -1, int type = 0, int cnt = 1000000);
 };
 
@@ -367,6 +370,22 @@ uwfd64 *uwfd64_tool::FindSerial(int num)
 	return array[i];
 }
 
+void uwfd64_tool::Inhibit(int serial, int what)
+{
+	int i;
+	uwfd64 *ptr;
+	if (serial < 0) {
+		for (i=0; i<N; i++) array[i]->Inhibit(what);
+	} else {
+		ptr = FindSerial(serial);
+		if (ptr == NULL) {
+			printf("Module %d not found.\n", serial);
+			return;
+		}
+		ptr->Inhibit(what);
+	}
+}
+
 void uwfd64_tool::Init(int serial)
 {
 	int i;
@@ -509,22 +528,18 @@ void uwfd64_tool::ReadConfig(char *fname)
 	}
 //	int TrigGenMask;	// Mask of slave xilinxes participating in trigger generation
 	if (config_lookup_int(&cnf, "Def.TrigGenMask", &tmp)) {
-		tmp &= TRIG_CSR_CHAN_MASK;
 		for (i=0; i<N; i++) array[i]->Conf.TrigGenMask = tmp;
 	}
 //	int TrigOrTime;		// Number of clocks to OR trigger sources
 	if (config_lookup_int(&cnf, "Def.TrigOrTime", &tmp)) {
-		tmp &= TRIG_CSR_SRCOR_MASK;
 		for (i=0; i<N; i++) array[i]->Conf.TrigOrTime = tmp;
 	}
 //	int TrigBlkTime;	// Number of clocks to block trigger production
 	if (config_lookup_int(&cnf, "Def.TrigBlkTime", &tmp)) {
-		tmp &= TRIG_CSR_BLOCK_MASK;
 		for (i=0; i<N; i++) array[i]->Conf.TrigBlkTime = tmp;
 	}
 //	int TrigUserWord;	// 15-bit user word to be put to trigger block
 	if (config_lookup_int(&cnf, "Def.TrigUserWord", &tmp)) {
-		tmp &= TRIG_CSR_USER_MASK;
 		for (i=0; i<N; i++) array[i]->Conf.TrigUserWord = tmp;
 	}
 //	int FifoBegin;		// Main FIFO start address in 8k blocks
@@ -583,25 +598,21 @@ void uwfd64_tool::ReadConfig(char *fname)
 //	int TrigGenMask;	// Mask of slave xilinxes participating in trigger generation
 		sprintf(str, "Dev%3.3d.TrigGenMask", array[i]->GetSerial());
 		if (config_lookup_int(&cnf, str, &tmp)) {
-			tmp &= TRIG_CSR_CHAN_MASK;
 			array[i]->Conf.TrigGenMask = tmp;
 		}
 //	int TrigOrTime;		// Number of clocks to OR trigger sources
 		sprintf(str, "Dev%3.3d.TrigOrTime", array[i]->GetSerial());
 		if (config_lookup_int(&cnf, str, &tmp)) {
-			tmp &= TRIG_CSR_SRCOR_MASK;
 			array[i]->Conf.TrigOrTime = tmp;
 		}
 //	int TrigBlkTime;	// Number of clocks to block trigger production
 		sprintf(str, "Dev%3.3d.TrigBlkTime", array[i]->GetSerial());
 		if (config_lookup_int(&cnf, str, &tmp)) {
-			tmp &= TRIG_CSR_BLOCK_MASK;
 			array[i]->Conf.TrigBlkTime = tmp;
 		}
 //	int TrigUserWord;	// 15-bit user word to be put to trigger block
 		sprintf(str, "Dev%3.3d.TrigUserWord", array[i]->GetSerial());
 		if (config_lookup_int(&cnf, str, &tmp)) {
-			tmp &= TRIG_CSR_USER_MASK;
 			array[i]->Conf.TrigUserWord = tmp;
 		}
 //	int FifoBegin;		// Main FIFO start address in 8k blocks
@@ -616,6 +627,22 @@ void uwfd64_tool::ReadConfig(char *fname)
 			tmp &= 0xFFFF;
 			array[i]->Conf.FifoEnd = tmp;
 		}
+	}
+}
+
+void uwfd64_tool::SoftTrigger(int serial, int freq)
+{
+	int i;
+	uwfd64 *ptr;
+	if (serial < 0) {
+		for (i=0; i<N; i++) array[i]->SoftTrigger(freq);
+	} else {
+		ptr = FindSerial(serial);
+		if (ptr == NULL) {
+			printf("Module %d not found.\n", serial);
+			return;
+		}
+		ptr->SoftTrigger(freq);
 	}
 }
 
@@ -667,7 +694,9 @@ void Help(void)
 	printf("H - print this Help;\n");
 	printf("I num|* [configfile] - Init, use current configuration or configfile if present;\n");
 	printf("J num|* addr [len] - dump Slave Xilinxes 16-bit registers;\n");
+	printf("K num|* freq - start soft trigger with frequency freq in Hz. freq = 0 - stop soft trigger; freq < 0 - do a single pulse;\n");
 	printf("L - List modules found;\n");
+	printf("M num|* 0|1 - clear/set inhibit;\n");
 	printf("P num|* [filename.bin] - Program. Use filename.bin or just pulse prog pin;\n");
 	printf("Q - Quit;\n");
 	printf("R num|* adc addr [data] - read/write ADC Registers;\n");
@@ -828,9 +857,43 @@ int Process(char *cmd, uwfd64_tool *tool)
 		ival = (tok) ? strtol(tok, NULL, 0) : 0x10;
 		tool->ICXDump(serial, addr, ival);
 		break;
+	case 'K':	// Soft trigger
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need module serial number or *.\n");
+	    		Help();
+	    		break;
+		}
+		serial = (tok[0] == '*') ? -1 : strtol(tok, NULL, 0);
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need frequency.\n");
+	    		Help();
+	    		break;
+		}
+		ival = strtol(tok, NULL, 0);
+		tool->SoftTrigger(serial, ival);
+		break;
 	case 'L':	// List
         	tool->List();
         	break;
+	case 'M':	// Inhibit
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need module serial number or *.\n");
+	    		Help();
+	    		break;
+		}
+		serial = (tok[0] == '*') ? -1 : strtol(tok, NULL, 0);
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need what to do: 0/1.\n");
+	    		Help();
+	    		break;
+		}
+		ival = strtol(tok, NULL, 0);
+		tool->Inhibit(serial, ival);
+		break;
 	case 'P':	// Prog
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {

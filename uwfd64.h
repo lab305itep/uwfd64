@@ -84,8 +84,8 @@ struct uwfd64_inout_reg {
 //                      in addition, programming of CDCUN required:
 //                      for modes 0-3 IN1 of CDCUN must be selected
 //                      for modes 4-7 IN2 of CDCUN must be selected
-//              CSR[11]  unused, some clocks are always on (if connected)
-//              CSR[31:12]      are general outputs to the upper hierarchy, CSR[31] is used for peripheral WB reset
+//              CSR[15:11]       general purpose CSR outputs
+//              CSR[30:16]       user word to be put to trigger block written to memory  
 //              CSR+4 [31:0] are general inputs from the upper hierarchy, unused so far
 //
 
@@ -109,7 +109,9 @@ struct uwfd64_csr_reg {
 #define MAIN_CSR_INH	0x10
 #define MAIN_CSR_BLKINH	0x80
 #define MAIN_CSR_CLK	0x100
-#define MAIN_CSR_RESET 0x80000000U
+#define MAIN_CSR_USER	0x10000
+#define MAIN_CSR_USER_MASK	0x7FFF0000
+#define MAIN_CSR_RESET 	0x80000000U
 
 //	Trigger generation module
 //              Registers:
@@ -118,7 +120,8 @@ struct uwfd64_csr_reg {
 //                      6:4     - 1 + time in clocks to accumulate OR of all trigger sources
 //                      15:7  - 1 + trigger blocking time (125MHz ticks), actual blocking time 
 //                                              cannot be less than token transmission time 14*TOKEN_CLKDIV clocks
-//                      30:16 - user word to be put to the trigger block to memory
+//                      28:16 - period in ms of the soft trigger generation, zero value means no periodical soft trigger, not generated on INH
+//                      30:29 - unused
 //                      31              - inhibit, set on power on
 //              1 TRGCNT        (R) :
 //                      counts issued master triggers when not inhibited, 11 LSB are used as trigger token
@@ -139,8 +142,8 @@ struct uwfd64_csr_reg {
 //              3       0 GTIME[14:0]             - lower GTIME
 //              4       0 GTIME[29:15]            - middle GTIME
 //              5       0 GTIME[44:30]            - higher GTIME
-//              6  0 TRIGCNT[14:0]        - lower trigger counter, 11 LSB coinside with token
-//              7  0 TRIGCNT[29:15]       - higher trigger counter
+//              6  	0 TRIGCNT[14:0]        - lower trigger counter, 11 LSB coinside with token
+//              7  	0 TRIGCNT[29:15]       - higher trigger counter
 
 struct uwfd64_trig_reg {
 	volatile unsigned int csr;
@@ -149,14 +152,14 @@ struct uwfd64_trig_reg {
 	volatile unsigned int gtime;
 };
 
-#define TRIG_CSR_CHAN	1
+#define TRIG_CSR_CHAN		1
 #define TRIG_CSR_CHAN_MASK	0xF
-#define TRIG_CSR_SRCOR	0x10
+#define TRIG_CSR_SRCOR		0x10
 #define TRIG_CSR_SRCOR_MASK	0x7F0
-#define TRIG_CSR_BLOCK	0x80
+#define TRIG_CSR_BLOCK		0x80
 #define TRIG_CSR_BLOCK_MASK	0xFF80
-#define TRIG_CSR_USER	0x10000
-#define TRIG_CSR_USER_MASK	0x7FFF0000
+#define TRIG_CSR_SOFT		0x10000
+#define TRIG_CSR_SOFT_MASK	0x1FFF0000
 #define TRIG_CSR_INHIBIT	0x80000000U
 
 struct uwfd64_spi_reg {
@@ -565,6 +568,7 @@ public:
 	int I2CWrite(int addr, int val);
 	int ICXRead(int addr);
 	int ICXWrite(int addr, int val);
+	void Inhibit(int what);
 	int Init(void);
 	int IsHere(void);
 	int IsDone(int wait = 0);
@@ -574,6 +578,7 @@ public:
 	int L2CWrite(int num, int addr, int val);
 	int Prog(char *fname = NULL);
 	void Reset(void);
+	void SoftTrigger(int freq);
 	int TestADCReg(int cnt);
 	int TestReg32(int cnt);
 	int TestSDRAM(int cnt);

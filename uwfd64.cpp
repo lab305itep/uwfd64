@@ -406,6 +406,15 @@ fin:
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	set (what != 0) / clear (what = 0) inhibit
+void uwfd64::Inhibit(int what)
+{
+	int tmp;	
+	tmp = a32->trig.csr;
+	a32->trig.csr = (what) ? (tmp | TRIG_CSR_INHIBIT) : (tmp & (~TRIG_CSR_INHIBIT));
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //	Do module initialization.
 int uwfd64::Init(void)
 {
@@ -419,11 +428,11 @@ int uwfd64::Init(void)
 	a32->i2c.ctr = I2C_CTR_CORE_ENABLE;
 	ConfigureMasterClock((Conf.MasterClockDiv & 4) ? 1 : 0, Conf.MasterClockDiv, Conf.MasterClockErc);
 	// Init main CSR
-	a32->csr.out = MAIN_CSR_TRG * (Conf.MasterTrigMux & MAIN_MUX_MASK) + 
-		MAIN_CSR_INH * (Conf.MasterInhMux & MAIN_MUX_MASK) + MAIN_CSR_CLK * (Conf.MasterClockMux & MAIN_MUX_MASK);
+	a32->csr.out = MAIN_CSR_TRG * (Conf.MasterTrigMux & MAIN_MUX_MASK) + MAIN_CSR_INH * (Conf.MasterInhMux & MAIN_MUX_MASK) + 
+		MAIN_CSR_CLK * (Conf.MasterClockMux & MAIN_MUX_MASK) + ((MAIN_CSR_USER * Conf.TrigUserWord) & MAIN_CSR_USER_MASK);
 	Reset();
 	// Init Main trigger source
-	a32->trig.csr = TRIG_CSR_INHIBIT + ((TRIG_CSR_USER * Conf.TrigUserWord) & TRIG_CSR_USER_MASK) + ((TRIG_CSR_BLOCK * Conf.TrigBlkTime) & TRIG_CSR_BLOCK_MASK) 
+	a32->trig.csr = TRIG_CSR_INHIBIT +  + ((TRIG_CSR_BLOCK * Conf.TrigBlkTime) & TRIG_CSR_BLOCK_MASK) 
 		+ ((TRIG_CSR_SRCOR * Conf.TrigOrTime) & TRIG_CSR_SRCOR_MASK) + ((TRIG_CSR_CHAN * Conf.TrigGenMask) & TRIG_CSR_CHAN_MASK);
 	a32->trig.gtime = 0;	// reset counters
 	// Init SDRAM FIFO
@@ -677,6 +686,24 @@ void uwfd64::Reset(void)
 {
 	a32->csr.out |= MAIN_CSR_RESET;
 	a32->csr.out &= ~MAIN_CSR_RESET;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Set or pulse soft trigger
+//	freq > 0 - soft trigger period in ms
+//	freq = 0 - forbid sof trigger
+//	freq < 0 - single pulse
+void uwfd64::SoftTrigger(int freq) 
+{
+	int tmp;
+	if (freq < 0) {
+		a32->trig.cnt = 0;
+	} else {
+		tmp = a32->trig.csr & (~TRIG_CSR_SOFT_MASK);
+		tmp |=  freq & TRIG_CSR_SOFT_MASK;
+		a32->trig.csr = tmp;
+	}
+
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
