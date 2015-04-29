@@ -38,6 +38,7 @@
 /* If ioctl's don't work, try checking headers from your kernel. */
 
 typedef unsigned int u32;
+typedef unsigned long long u64;
 
 #define __packed                        __attribute__((packed))
 
@@ -50,17 +51,20 @@ struct vme_master {
         u32 dwidth;             /* Maximum Data Width */
 } __packed;
 
-struct vme_dma {
-	u32 aspace;
-	u32 cycle;
-	u32 dwidth;
-};
+struct vme_dma_op {
+        u32 aspace;           /* Address Space */
+        u32 cycle;            /* Cycle properties */
+        u32 dwidth;           /* Data transfer width */
+        u64 vme_addr;         /* Starting Address on the VMEbus */
+        u64 buf_vaddr;        /* Pointer to userspace memory */
+        u32 count;            /* Count of bytes to copy */
+        u32 write;            /* Write flag */
+} __packed;
 
 #define VME_IOC_MAGIC 0xAE
 
 #define VME_GET_MASTER _IOR(VME_IOC_MAGIC, 3, struct vme_master)
 #define VME_SET_MASTER _IOW(VME_IOC_MAGIC, 4, struct vme_master)
-#define VME_GET_DMA _IOR(VME_IOC_MAGIC, 7, struct vme_dma)
-#define VME_SET_DMA _IOW(VME_IOC_MAGIC, 8, struct vme_dma)
+#define VME_DMA_OP _IOW(VME_IOC_MAGIC, 7, struct vme_dma_op)
 
 #endif
