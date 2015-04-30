@@ -232,6 +232,8 @@ struct uwfd64_i2c_reg {
 //                              CSR30   (RWC) Full reset of the module (MCB, WBRAM fsm, FIFOs) -- auto cleared
 //                              CSR29   (RWC) MCB and WBRAM fsm reset -- auto cleared
 //                              CSR28   (RW)  enable debug, when 1 WADR reads debug lines rather than last written block addr
+//                              CSR27   (R)     arbitter paused because of errors or memory full
+//                              CSR26   (R)     RADR invalid: specified RADR is beyond limits set by LIMR
 //                              CSR[23:20] (R)  same as CSR[7:4] for fifo 4
 //                              CSR[19:16] (R)  same as CSR[7:4] for fifo 3
 //                              CSR[15:12] (R)  same as CSR[7:4] for fifo 2
@@ -272,6 +274,9 @@ struct uwfd64_fifo_reg {
 #define FIFO_CSR_OVERRUN	4
 #define FIFO_CSR_UNDERRUN	8
 #define FIFO_CSR_SHIFT		4
+#define FIFO_CSR_ERROR		0xEEEEEE
+#define FIFO_CSR_RADRERROR	0x4000000
+#define FIFO_CSR_PAUSE		0x8000000
 #define FIFO_CSR_DEBUG  	0x10000000
 #define FIFO_CSR_SRESET 	0x20000000
 #define FIFO_CSR_HRESET 	0x40000000
@@ -554,12 +559,14 @@ public:
 	int ADCWrite(int num, int addr, int val);
 	int ConfigureMasterClock(int sel, int div, int erc = 0);
 	int ConfigureSlaveClock(int num, const char *fname);
+	void EnableFifo(int what);
 	int DACSet(int val);
 	int GetADCID(int num);
 	inline int GetBase16(void) { return A16BASE + serial * A16STEP; };
 	inline unsigned int GetBase32(void) { return A32BASE + ga * A32STEP; };
 	inline unsigned long long GetBase64(void) { return A64BASE + ga * A64STEP; };
 	inline int GetBatch(void) { return (a16->bnum >> 8) & 0xFF; };
+	int GetFromFifo(void *buf, int size);
 	inline int GetGA(void) { return ga; };
 	inline int GetSerial(void) { return serial; };
 	inline int GetVersion(void) { return a32->ver.in; };
@@ -578,8 +585,10 @@ public:
 	int L2CWrite(int num, int addr, int val);
 	int Prog(char *fname = NULL);
 	void Reset(void);
+	inline void ResetFifo(int mask = FIFO_CSR_HRESET | FIFO_CSR_SRESET) {a32->fifo.csr |= mask & (FIFO_CSR_HRESET | FIFO_CSR_SRESET); };
 	void SoftTrigger(int freq);
 	int TestADCReg(int cnt);
+	int TestFifo(int cnt);
 	int TestReg32(int cnt);
 	int TestSDRAM(int cnt);
 	int TestSlaveReg16(int cnt);

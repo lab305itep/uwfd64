@@ -53,6 +53,7 @@ public:
 	void ReadConfig(char *fname);
 	void SoftTrigger(int serial, int freq);
 	void Test(int serial = -1, int type = 0, int cnt = 1000000);
+	void WriteFile(int serial, char *fname, int size);
 };
 
 uwfd64_tool::uwfd64_tool(void)
@@ -264,6 +265,9 @@ int uwfd64_tool::DoTest(uwfd64 *ptr, int type, int cnt)
 	case 5:		
 		irc = 0;
 		for (i=0; i<cnt; i++) irc += ptr->ConfigureSlaveClock(i & 3, "Si5338-125MHz.h");
+		break;
+	case 6:
+		irc = ptr->TestFifo(cnt);
 		break;
 	default:
 		irc = -10;
@@ -678,6 +682,61 @@ void uwfd64_tool::Test(int serial, int type, int cnt)
 	}
 }
 
+void uwfd64_tool::WriteFile(int serial, char *fname, int size)
+{
+	uwfd64 *ptr;
+	FILE *f;
+	long long i;
+	long long S;
+	int irc;
+	void *buf;
+
+	ptr = FindSerial(serial);
+	if (ptr == NULL) {
+		printf("Module %d not found.\n", serial);
+		return;
+	}
+
+	buf = malloc(MBYTE);
+	if (!buf) {
+		printf("No memory: %m.\n");
+		return;
+	}
+
+	f = fopen(fname, "wb");
+	if (!f) {
+		printf("Can not open file %s: %m.\n", fname);
+		free(buf);
+		return;
+	}
+
+	ptr->EnableFifo(0);	// clear FIFO
+	ptr->ResetFifo(FIFO_CSR_SRESET);
+	ptr->EnableFifo(1);	// enable FIFO
+
+	S = (long long) size * MBYTE;
+	
+	for (i=0; i<S; i += irc) {
+		irc = ptr->GetFromFifo(buf, MBYTE);
+		if (irc < 0) {
+			printf("File write error %d\n", -irc);
+			break;
+		}
+		if (irc == 0) {
+			vmemap_usleep(10000);	// nothing was there - sleep some time
+		} else {
+			if (fwrite(buf, irc, 1, f) != 1) {
+				printf("File write error: %m.\n");
+				break;
+			}
+		}
+	}
+
+	ptr->EnableFifo(0);
+	free(buf);
+	fclose(f);
+}
+
 //*************************************************************************************************************************************//
 
 void Help(void)
@@ -694,9 +753,10 @@ void Help(void)
 	printf("H - print this Help;\n");
 	printf("I num|* [configfile] - Init, use current configuration or configfile if present;\n");
 	printf("J num|* addr [len] - dump Slave Xilinxes 16-bit registers;\n");
-	printf("K num|* freq - start soft trigger with frequency freq in Hz. freq = 0 - stop soft trigger; freq < 0 - do a single pulse;\n");
+	printf("K num|* freq - start soft trigger with period freq in ms. freq = 0 - stop soft trigger; freq < 0 - do a single pulse;\n");
 	printf("L - List modules found;\n");
 	printf("M num|* 0|1 - clear/set inhibit;\n");
+	printf("N num size fname - get size Mbytes of data to file fname;\n");
 	printf("P num|* [filename.bin] - Program. Use filename.bin or just pulse prog pin;\n");
 	printf("Q - Quit;\n");
 	printf("R num|* adc addr [data] - read/write ADC Registers;\n");
@@ -707,7 +767,8 @@ void Help(void)
 	printf("\t2 - test SDRAM;\n");
 	printf("\t3 - write/read 16-bit register in slave Xilinxes with random numbers;\n");
 	printf("\t4 - write/read 8-bit pattern 1 LSB register in ADCs with random numbers;\n");
-	printf("\t5 - configure and read back slave clock controller SiLabs Si5338.\n");
+	printf("\t5 - configure and read back slave clock controller SiLabs Si5338;\n");
+	printf("\t6 - get blocks to fifo and check format (length and CW).\n");
 	printf("U num|* addr [data] - read/write 16-bit word to clock CDCUN1208LP chip using I2C;\n");
 	printf("X num|* addr [data] - send/receive data from slave Xilinxes via SPI. addr - SPI address.\n");
 }
@@ -893,6 +954,29 @@ int Process(char *cmd, uwfd64_tool *tool)
 		}
 		ival = strtol(tok, NULL, 0);
 		tool->Inhibit(serial, ival);
+		break;
+	case 'N':	// Write data to file
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need module serial number.\n");
+	    		Help();
+	    		break;
+		}
+		serial = strtol(tok, NULL, 0);
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need amount of data to get.\n");
+	    		Help();
+	    		break;
+		}
+		ival = strtol(tok, NULL, 0);
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need filename.\n");
+	    		Help();
+	    		break;
+		}
+		tool->WriteFile(serial, tok, ival);
 		break;
 	case 'P':	// Prog
 		tok = strtok(NULL, DELIM);

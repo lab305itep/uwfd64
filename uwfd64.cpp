@@ -268,6 +268,17 @@ fin:
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Enable (what != 0) / disable Fifo
+void uwfd64::EnableFifo(int what)
+{
+	if (what) {
+		a32->fifo.csr |= FIFO_CSR_ENABLE;
+	} else {
+		a32->fifo.csr &= ~FIFO_CSR_ENABLE;
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //	Read ADC ID : regs 1 and 2.
 //	num - ADC number (1-15)
 //	Return 16-bit value ID:GRADE if OK, -10 on error
@@ -280,6 +291,41 @@ int uwfd64::GetADCID(int num)
 	if (grade < 0) return grade;
 	return (id << 8) + grade;
 }
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Try to get data from FIFO
+//	buf - buffer for data
+//	size - buffer size
+//	Return number of bytes got, 0 - no data, negative on errors
+int uwfd64::GetFromFifo(void *buf, int size)
+{
+	int fifobot, fifotop, fifolen;
+	int rptr, wptr, len;
+	
+	rptr = a32->fifo.rptr;
+	wptr = a32->fifo.wptr;
+
+	if (rptr == wptr) return 0;
+
+	fifolen = a32->fifo.win;
+	fifobot = (fifolen & 0xFFFF) << 13;
+	fifotop = (fifolen >> 3) & 0x1FFFE000;
+	fifolen = fifotop - fifobot;
+
+	len = wptr - rptr;
+	if (len < 0) len += fifolen;
+	if (len < 0) return -1;
+	if (len > size) len = size;
+	if (rptr + len > fifotop) len = fifotop - rptr;
+
+	if (vmemap_a64_dmaread(GetBase64() + rptr, (unsigned int *)buf, len)) return -2;
+	rptr += len;
+	if (rptr == fifotop) rptr = fifobot;
+	a32->fifo.rptr = rptr;
+	
+	return len;
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //	Read CDCUN via I2C
@@ -436,7 +482,7 @@ int uwfd64::Init(void)
 		+ ((TRIG_CSR_SRCOR * Conf.TrigOrTime) & TRIG_CSR_SRCOR_MASK) + ((TRIG_CSR_CHAN * Conf.TrigGenMask) & TRIG_CSR_CHAN_MASK);
 	a32->trig.gtime = 0;	// reset counters
 	// Init SDRAM FIFO
-	a32->fifo.csr = FIFO_CSR_HRESET;
+	a32->fifo.csr = FIFO_CSR_HRESET | FIFO_CSR_SRESET;
 	a32->fifo.win = (Conf.FifoBegin & 0xFFFF) + ((Conf.FifoEnd & 0xFFFF) << 16);
 	// Set DAC to middle range
 	if(DACSet(Conf.DAC)) errcnt++;
@@ -700,10 +746,9 @@ void uwfd64::SoftTrigger(int freq)
 		a32->trig.cnt = 0;
 	} else {
 		tmp = a32->trig.csr & (~TRIG_CSR_SOFT_MASK);
-		tmp |=  freq & TRIG_CSR_SOFT_MASK;
+		tmp |=  (freq * TRIG_CSR_SOFT) & TRIG_CSR_SOFT_MASK;
 		a32->trig.csr = tmp;
 	}
-
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -721,6 +766,86 @@ int uwfd64::TestADCReg(int cnt)
 		r = ADCRead(j, ADC_REG_PAT1L) & 0xFF;
 		if (w != r) errcnt++;
 	}
+	return errcnt;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Get data via FIFO. Check block format
+//	cnt - number of blocks to get
+//	Return number of errors
+int uwfd64::TestFifo(int cnt)
+{
+	int errcnt;
+	unsigned short *buf;
+	int i, j, k, len, rlen, raddr;
+	int blkcnt;
+	int fifobot, fifotop, fifosize;
+	
+	buf = (unsigned short *) malloc(MBYTE);
+	if (!buf) return -1;
+	errcnt = 0;
+	rlen  = 0;
+//		reset FIFO and get fifo parameters
+	a32->fifo.csr &= ~FIFO_CSR_ENABLE;
+	a32->fifo.csr |= FIFO_CSR_SRESET;
+	i = a32->fifo.win;
+	j = i & 0xFFFF;
+	i = (i >> 16) & 0xFFFF;
+	if (j >= i) {
+		free(buf);	
+		return -1;	// wrong sizes
+	}
+	fifobot = j << 13;
+	fifotop = i << 13;
+	fifosize = fifotop - fifobot;
+	a32->fifo.csr |= FIFO_CSR_ENABLE;
+
+	for (i = 0; i < cnt; i += blkcnt) {
+		blkcnt = 0;
+		if (a32->fifo.csr & FIFO_CSR_ERROR) {
+			free(buf);
+			return -2;
+		}
+		if (a32->fifo.csr & FIFO_CSR_EMPTY) continue;
+		raddr = a32->fifo.rptr;
+		len = a32->fifo.wptr - raddr;
+		if (len < 0) len += fifosize;
+		if (len < 0) {
+			free(buf);
+			return -3;
+		}
+		if (len > MBYTE) len = MBYTE;
+		if (raddr + len > fifotop) len = fifotop - raddr;
+		if (vmemap_a64_dmaread(GetBase64() + raddr, (unsigned int *)buf, len)) {
+			free(buf);
+			return -4;
+		}
+		raddr += len;
+		if (raddr == fifotop) raddr = fifobot;
+		a32->fifo.rptr = raddr;
+//		printf("\nraddr = 0x%X  len = %d\n", raddr, len);
+		for (k = 0; k < len / sizeof(short); k++) {
+			if (buf[k] & 0x8000) {
+//	control word
+				if (rlen) {
+					errcnt++;
+					printf("Error %6d: rlen = %4d  d = %4.4X @raddr = %X, addr = %X, len = %X\n", errcnt, rlen, buf[k], raddr, raddr + 2*k, len);
+				}
+				rlen = buf[k] & 0x1FF;
+				blkcnt++;
+//				printf("\nerrcnt = %d\n", errcnt);
+			} else if (rlen) {
+//	ordinary word
+				rlen--;
+			} else {
+				errcnt++;
+				printf("Error %6d: rlen = %4d  d = %4.4X @raddr = %X, addr = %X, len = %X\n", errcnt, rlen, buf[k], raddr, raddr + 2*k, len);				
+			}
+//			printf("%4.4X ", buf[k]);
+		}
+	}
+
+	free(buf);
 	return errcnt;
 }
 
@@ -767,7 +892,7 @@ int uwfd64::TestSDRAM(int cnt)
 		vme_addr = GetBase64();
 		for (k = 0; k < j; k++) {
 			for(m = 0; m < MBYTE / sizeof(int); m++) buf[m] = mrand48();
-			irc = vmemap_a64_blkwrite(A64UNIT, vme_addr, buf, MBYTE);
+			irc = vmemap_a64_dmawrite(vme_addr, buf, MBYTE);
 //			printf("Writing: i=%d j=%d k=%d irc=%d\n", i, j, k, irc);
 			if (irc) {
 				free(buf);
@@ -779,7 +904,7 @@ int uwfd64::TestSDRAM(int cnt)
 		srand48(seed);
 		vme_addr = GetBase64();
 		for (k = 0; k < j; k++) {
-			irc = vmemap_a64_blkread(A64UNIT, vme_addr, buf, MBYTE);
+			irc = vmemap_a64_dmaread(vme_addr, buf, MBYTE);
 //			printf("Reading: i=%d j=%d k=%d irc=%d\n", i, j, k, irc);
 			if (irc) {
 				free(buf);

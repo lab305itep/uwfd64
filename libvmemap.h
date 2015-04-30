@@ -63,6 +63,21 @@ int vmemap_a64_blkwrite(
 	int len				// length in bytes
 );
 
+/* Read block A64D32 using DMA. Return 0 if OK, -1 on error */
+int vmemap_a64_dmaread(
+	unsigned long long vme_addr, 	// VME address
+	unsigned int *data,		// buffer for data
+	int len				// length in bytes
+);
+
+/* Write block A64D32 using DMA. Return 0 if OK, negative number on error */
+int vmemap_a64_dmawrite(
+	unsigned long long vme_addr, 	// VME address
+	unsigned int *data,		// the data
+	int len				// length in bytes
+);
+
+
 /* Sleep number of usec using nanosleep */
 void vmemap_usleep(
 	int usec

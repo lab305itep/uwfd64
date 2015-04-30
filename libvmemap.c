@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <sys/mman.h>
+#include <sys/ioctl.h>
 #include <time.h>
 #include <unistd.h>
 #include "libvmemap.h"
@@ -157,6 +158,71 @@ int vmemap_a64_blkwrite(
 	for (i=0; i<len/4; i++) ptr[i] = data[i];
 	vmemap_close(ptr);
 	return 0;
+}
+
+/* Read block A64D32 using DMA. Return 0 if OK, -1 on error */
+int vmemap_a64_dmaread(
+	unsigned long long vme_addr, 	// VME address
+	unsigned int *data,		// buffer for data
+	int len				// length in bytes
+) {
+	int fd;
+	int i;
+	int irc;
+	struct vme_dma dma;
+
+	fd = open("/dev/bus/vme/dma0", O_RDWR);
+	if (fd < 0) return -1;
+
+	dma.aspace = VME_A64;
+	dma.cycle = VME_USER | VME_DATA | VME_BLT;
+	dma.dwidth = VME_D32;
+	if (ioctl(fd, VME_SET_DMA, &dma)) goto err;
+	if (lseek(fd, vme_addr, SEEK_SET) == -1) goto err;		
+
+	for (i = 0; i < len; i += irc) {
+		irc = read(fd, &(((char *)data)[i]), len - i);
+		if (irc <= 0) goto err;
+	}
+
+	close(fd);
+	return 0;
+err:
+	close(fd);
+	return -1;
+}
+
+
+/* Write block A64D32 using DMA. Return 0 if OK, negative number on error */
+int vmemap_a64_dmawrite(
+	unsigned long long vme_addr, 	// VME address
+	unsigned int *data,		// the data
+	int len				// length in bytes
+) {
+	int fd;
+	int irc;
+	int i;
+	struct vme_dma dma;
+
+	fd = open("/dev/bus/vme/dma0", O_RDWR);
+	if (fd < 0) return -1;
+
+	dma.aspace = VME_A64;
+	dma.cycle = VME_USER | VME_DATA | VME_BLT;
+	dma.dwidth = VME_D32;
+	if (ioctl(fd, VME_SET_DMA, &dma)) goto err;
+	if (lseek(fd, vme_addr, SEEK_SET) == -1) goto err;		
+	
+	for (i = 0; i < len; i += irc) {
+		irc = write(fd, &(((char *)data)[i]), len - i);
+		if (irc <= 0) goto err;
+	}
+
+	close(fd);
+	return 0;
+err:
+	close(fd);
+	return -1;
 }
 
 /* Sleep number of usec using nanosleep */
