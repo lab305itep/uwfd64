@@ -99,6 +99,18 @@ void vmemap_close(
 	Map[i].fd = -1;
 }
 
+/*	Open DMA channel. Return file descriptor	*/
+int vmedma_open(void)
+{
+	return open("/dev/bus/vme/dma0", O_RDWR);
+}
+
+/*	Close dma channel.	*/
+void vmedma_close(int fd)
+{
+	close(fd);
+}
+
 /* Read A64D32. Return the value if OK, -1 on error */
 int vmemap_a64_read(
 	unsigned int unit, 		// Tundra master window.
@@ -160,69 +172,26 @@ int vmemap_a64_blkwrite(
 	return 0;
 }
 
-/* Read block A64D32 using DMA. Return 0 if OK, -1 on error */
-int vmemap_a64_dmaread(
+/* Read/Write block A64D32 using DMA. Return 0 if OK, -1 on error */
+int vmemap_a64_dma(
+	int fd,				// DMA file 
 	unsigned long long vme_addr, 	// VME address
 	unsigned int *data,		// buffer for data
-	int len				// length in bytes
+	int len,			// length in bytes
+	int rw				// rw = 0 - read, rw = 1 - write
 ) {
-	int fd;
-	int i;
-	int irc;
-	struct vme_dma dma;
-
-	fd = open("/dev/bus/vme/dma0", O_RDWR);
-	if (fd < 0) return -1;
+	struct vme_dma_op dma;
 
 	dma.aspace = VME_A64;
 	dma.cycle = VME_USER | VME_DATA | VME_BLT;
 	dma.dwidth = VME_D32;
-	if (ioctl(fd, VME_SET_DMA, &dma)) goto err;
-	if (lseek(fd, vme_addr, SEEK_SET) == -1) goto err;		
-
-	for (i = 0; i < len; i += irc) {
-		irc = read(fd, &(((char *)data)[i]), len - i);
-		if (irc <= 0) goto err;
-	}
-
-	close(fd);
+	dma.vme_addr = vme_addr;
+	dma.buf_vaddr = (unsigned long) data;
+	dma.count = len;
+	dma.write = rw;
+	printf("vma_addr = %LX   user_addr = %LX   len = %X\n", dma.vme_addr, dma.buf_vaddr, dma.count);
+	if (ioctl(fd, VME_DMA_OP, &dma) != len) return -1;
 	return 0;
-err:
-	close(fd);
-	return -1;
-}
-
-
-/* Write block A64D32 using DMA. Return 0 if OK, negative number on error */
-int vmemap_a64_dmawrite(
-	unsigned long long vme_addr, 	// VME address
-	unsigned int *data,		// the data
-	int len				// length in bytes
-) {
-	int fd;
-	int irc;
-	int i;
-	struct vme_dma dma;
-
-	fd = open("/dev/bus/vme/dma0", O_RDWR);
-	if (fd < 0) return -1;
-
-	dma.aspace = VME_A64;
-	dma.cycle = VME_USER | VME_DATA | VME_BLT;
-	dma.dwidth = VME_D32;
-	if (ioctl(fd, VME_SET_DMA, &dma)) goto err;
-	if (lseek(fd, vme_addr, SEEK_SET) == -1) goto err;		
-	
-	for (i = 0; i < len; i += irc) {
-		irc = write(fd, &(((char *)data)[i]), len - i);
-		if (irc <= 0) goto err;
-	}
-
-	close(fd);
-	return 0;
-err:
-	close(fd);
-	return -1;
 }
 
 /* Sleep number of usec using nanosleep */

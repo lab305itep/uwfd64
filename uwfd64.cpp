@@ -12,7 +12,7 @@
 #include "uwfd64.h"
 
 //	Constructor - only set addresses here
-uwfd64::uwfd64(int sernum, int gnum, unsigned short *space_a16, unsigned int *space_a32)
+uwfd64::uwfd64(int sernum, int gnum, unsigned short *space_a16, unsigned int *space_a32, int fd)
 {
 	int s, i;
 
@@ -20,6 +20,7 @@ uwfd64::uwfd64(int sernum, int gnum, unsigned short *space_a16, unsigned int *sp
 	ga = gnum;
 	a16 = (struct uwfd64_a16_reg *)((char *)space_a16 + serial * A16STEP);
 	a32 = (struct uwfd64_a32_reg *)((char *)space_a32 + ga * A32STEP);
+	dma_fd = fd;
 	// initial configuration - empty
 	memset(&Conf, 0, sizeof(Conf));
 	Conf.FifoEnd = 1;	// minimum FIFO size of 8kBytes
@@ -318,7 +319,7 @@ int uwfd64::GetFromFifo(void *buf, int size)
 	if (len > size) len = size;
 	if (rptr + len > fifotop) len = fifotop - rptr;
 
-	if (vmemap_a64_dmaread(GetBase64() + rptr, (unsigned int *)buf, len)) return -2;
+	if (vmemap_a64_dma(dma_fd, GetBase64() + rptr, (unsigned int *)buf, len, 0)) return -2;
 	rptr += len;
 	if (rptr == fifotop) rptr = fifobot;
 	a32->fifo.rptr = rptr;
@@ -735,6 +736,17 @@ void uwfd64::Reset(void)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Fifo reset. 
+//	mask = FIFO_CSR_HRESET - hard reset
+//	mask = FIFO_CSR_SRESET - soft reset
+void uwfd64::ResetFifo(int mask) 
+{
+	a32->fifo.csr |= mask & (FIFO_CSR_HRESET | FIFO_CSR_SRESET); 
+	vmemap_usleep(2000);
+};
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //	Set or pulse soft trigger
 //	freq > 0 - soft trigger period in ms
 //	freq = 0 - forbid sof trigger
@@ -787,7 +799,7 @@ int uwfd64::TestFifo(int cnt)
 	rlen  = 0;
 //		reset FIFO and get fifo parameters
 	a32->fifo.csr &= ~FIFO_CSR_ENABLE;
-	a32->fifo.csr |= FIFO_CSR_SRESET;
+	ResetFifo(FIFO_CSR_HRESET);
 	i = a32->fifo.win;
 	j = i & 0xFFFF;
 	i = (i >> 16) & 0xFFFF;
@@ -816,13 +828,11 @@ int uwfd64::TestFifo(int cnt)
 		}
 		if (len > MBYTE) len = MBYTE;
 		if (raddr + len > fifotop) len = fifotop - raddr;
-		if (vmemap_a64_dmaread(GetBase64() + raddr, (unsigned int *)buf, len)) {
+		if (vmemap_a64_dma(dma_fd, GetBase64() + raddr, (unsigned int *)buf, len, 0)) {
+//		if (vmemap_a64_blkread(A64UNIT, GetBase64() + raddr, (unsigned int *)buf, len)) {
 			free(buf);
 			return -4;
 		}
-		raddr += len;
-		if (raddr == fifotop) raddr = fifobot;
-		a32->fifo.rptr = raddr;
 //		printf("\nraddr = 0x%X  len = %d\n", raddr, len);
 		for (k = 0; k < len / sizeof(short); k++) {
 			if (buf[k] & 0x8000) {
@@ -843,6 +853,9 @@ int uwfd64::TestFifo(int cnt)
 			}
 //			printf("%4.4X ", buf[k]);
 		}
+		raddr += len;
+		if (raddr == fifotop) raddr = fifobot;
+		a32->fifo.rptr = raddr;
 	}
 
 	free(buf);
@@ -892,7 +905,7 @@ int uwfd64::TestSDRAM(int cnt)
 		vme_addr = GetBase64();
 		for (k = 0; k < j; k++) {
 			for(m = 0; m < MBYTE / sizeof(int); m++) buf[m] = mrand48();
-			irc = vmemap_a64_dmawrite(vme_addr, buf, MBYTE);
+			irc = vmemap_a64_dma(dma_fd, vme_addr, buf, MBYTE, 1);
 //			printf("Writing: i=%d j=%d k=%d irc=%d\n", i, j, k, irc);
 			if (irc) {
 				free(buf);
@@ -904,7 +917,7 @@ int uwfd64::TestSDRAM(int cnt)
 		srand48(seed);
 		vme_addr = GetBase64();
 		for (k = 0; k < j; k++) {
-			irc = vmemap_a64_dmaread(vme_addr, buf, MBYTE);
+			irc = vmemap_a64_dma(dma_fd, vme_addr, buf, MBYTE, 0);
 //			printf("Reading: i=%d j=%d k=%d irc=%d\n", i, j, k, irc);
 			if (irc) {
 				free(buf);

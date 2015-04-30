@@ -21,6 +21,7 @@ private:
 	int N;
 	unsigned short *a16;
 	unsigned int *a32;
+	int dma_fd;
 	int DoTest(uwfd64 *ptr, int type, int cnt);
 	uwfd64 *FindSerial(int num);
 public:
@@ -40,7 +41,7 @@ public:
 	void DACSet(int serial = -1, int val = 0x2000);
 	void I2CRead(int serial, int addr);	
 	void I2CWrite(int serial, int addr, int ival);
-	inline int IsOK(void) { return a16 && a32; };
+	inline int IsOK(void) { return a16 && a32 && (dma_fd >= 0); };
 	void ICXDump(int serial, int addr, int len);
 	void ICXRead(int serial, int addr);
 	void ICXWrite(int serial, int addr, int ival);
@@ -65,10 +66,11 @@ uwfd64_tool::uwfd64_tool(void)
 
 	a16 = (unsigned short *) vmemap_open(A16UNIT, A16BASE, 0x100 * A16STEP, VME_A16, VME_USER | VME_DATA, VME_D16);
 	a32 = vmemap_open(A32UNIT, A32BASE, 0x100 * A32STEP, VME_A32, VME_USER | VME_DATA, VME_D32);
+	dma_fd = vmedma_open();
 	if (!IsOK()) return;
 
 	for (i = 0; i < 255 && N < 20; i++) {
-		ptr = new uwfd64(i, N + 2, a16, a32);
+		ptr = new uwfd64(i, N + 2, a16, a32, dma_fd);
 		if (!ptr->IsHere()) continue;
 		array[N] = ptr;
 		N++;
@@ -81,6 +83,7 @@ uwfd64_tool::~uwfd64_tool(void)
 	for (i = 0; i < N; i++) delete array[i];
 	if (a16) vmemap_close((unsigned int *)a16);
 	if (a32) vmemap_close(a32);
+	if (dma_fd >= 0) vmedma_close(dma_fd);
 }
 
 void uwfd64_tool::A16Dump(int addr, int len)
@@ -1131,6 +1134,7 @@ int main(int argc, char **argv)
 	uwfd64_tool *tool;
 
 	tool = new uwfd64_tool();
+//	printf("The tool created...\n");
 	if (!tool->IsOK()) {
 		printf("Can not open VME.\n");
 		return -10;

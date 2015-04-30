@@ -552,9 +552,10 @@ private:
 	int ga;
 	struct uwfd64_a16_reg *a16;
 	struct uwfd64_a32_reg *a32;
+	int dma_fd;
 	struct uwfd64_module_config Conf;
 public:
-	uwfd64(int sernum, int gnum, unsigned short *space_a16, unsigned int *space_a32);
+	uwfd64(int sernum, int gnum, unsigned short *space_a16, unsigned int *space_a32, int fd);
 	int ADCRead(int num, int addr);
 	int ADCWrite(int num, int addr, int val);
 	int ConfigureMasterClock(int sel, int div, int erc = 0);
@@ -585,7 +586,7 @@ public:
 	int L2CWrite(int num, int addr, int val);
 	int Prog(char *fname = NULL);
 	void Reset(void);
-	inline void ResetFifo(int mask = FIFO_CSR_HRESET | FIFO_CSR_SRESET) {a32->fifo.csr |= mask & (FIFO_CSR_HRESET | FIFO_CSR_SRESET); };
+	void ResetFifo(int mask = FIFO_CSR_HRESET | FIFO_CSR_SRESET);
 	void SoftTrigger(int freq);
 	int TestADCReg(int cnt);
 	int TestFifo(int cnt);
