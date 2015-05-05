@@ -78,6 +78,42 @@ err:
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Scans and adjusts ADC input delays
+//	adcmask - 16 bit mask of module ADCs to be adjusted
+//	adsmask[16] = 1 produces extensive output
+//	return 0 if OK, negative on error.
+int uwfd64::ADCAdjust(int adcmask)
+{
+	int i, xil, adc, irc;
+	const int ftime = 6;
+
+	// Check ADC frequency
+	// start freq measurement
+	for (i=0; i<4; i++) {
+		if (!(adcmask & (0xF << (4*i)))) continue;
+		xil = ICX_SLAVE_STEP * i;
+    		if (ICXWrite(xil + ICX_SLAVE_CSR_OUT, SLAVE_CSR_TSTART | (ftime << 4))) return -1;			
+    		if (ICXWrite(xil + ICX_SLAVE_CSR_OUT, (ftime << 4))) return -1;			
+	}
+	// check measurement done
+	for (i=0; i<4; i++) {
+		if (!(adcmask & (0xF << (4*i)))) continue;
+		xil = ICX_SLAVE_STEP * i;
+    		while (!(ICXRead(xil + ICX_SLAVE_CSR_IN) & SLAVE_CSR_TSTART));			
+	}
+	// read freq result
+	if (adcmask & 0x10000) printf("ADC Freqs: ");
+	for (i=0; i<16; i++) {
+		if (!(adcmask & (1 << i))) continue;
+		adc = ICX_SLAVE_STEP * (i >> 2) + ICX_SLAVE_ADC + ICX_SLAVE_ADC_STEP * (i & 3);
+		irc = ICXRead(adc + ICX_SLAVE_ADC_CFRQ);		 
+		if (adcmask & 0x10000) printf(" %X=%.2f", i, 125.0 * irc / (double)(1 << 2*ftime));
+		if (labs(irc - (1 << 2*ftime)) > 2) return -10-i;
+	}	
+	if (adcmask & 0x10000) printf("\n");
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //	Configure Master clock multiplexer CDCUN1208LP
 //	sel - input clock select: 0 - internal, 1 - external
 //	div - input clock divider: 0 - 1, 1 - 2, 2 - 4, 3 - 8.
@@ -503,8 +539,8 @@ int uwfd64::Init(void)
 	// ADC output offset binary
 	for (i=0; i<16; i++) if(ADCWrite(i, ADC_REG_OUTPUT, 0)) errcnt++;
 	// Activate bitslip
-	for (i=0; i<4; i++) if(ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_CSR_OUT, SLAVE_CSR_BSDISABLE + SLAVE_CSR_BSRESET)) errcnt++;
-	for (i=0; i<4; i++) if(ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_CSR_OUT, SLAVE_CSR_BSDISABLE)) errcnt++;
+//	for (i=0; i<4; i++) if(ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_CSR_OUT, SLAVE_CSR_BSDISABLE + SLAVE_CSR_BSRESET)) errcnt++;
+//	for (i=0; i<4; i++) if(ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_CSR_OUT, SLAVE_CSR_BSDISABLE)) errcnt++;
 	for (i=0; i<4; i++) if(ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_CSR_OUT, 0)) errcnt++;
 	return errcnt;
 }
@@ -787,9 +823,9 @@ int uwfd64::TestADCReg(int cnt)
 //	Return number of errors
 int uwfd64::TestFifo(int cnt)
 {
-	int errcnt;
+	int errcnt, eflag;
 	unsigned short *buf;
-	int i, j, k, len, rlen, raddr;
+	int i, j, k, len, rlen, raddr, waddr;
 	int blkcnt;
 	int fifobot, fifotop, fifosize;
 	
@@ -814,13 +850,17 @@ int uwfd64::TestFifo(int cnt)
 
 	for (i = 0; i < cnt; i += blkcnt) {
 		blkcnt = 0;
-		if (a32->fifo.csr & FIFO_CSR_ERROR) {
+		eflag = 0;
+		if ((k=a32->fifo.csr) & FIFO_CSR_ERROR) {
+printf("error in fifoCSR: %8.8X(%8.8X)\n", a32->fifo.csr, k);
+if (k & 8) {printf("debug = %8.8X\n", a32->fifo.win);}
 			free(buf);
 			return -2;
 		}
 		if (a32->fifo.csr & FIFO_CSR_EMPTY) continue;
 		raddr = a32->fifo.rptr;
-		len = a32->fifo.wptr - raddr;
+		waddr = a32->fifo.wptr;
+		len = waddr - raddr;
 		if (len < 0) len += fifosize;
 		if (len < 0) {
 			free(buf);
@@ -828,8 +868,9 @@ int uwfd64::TestFifo(int cnt)
 		}
 		if (len > MBYTE) len = MBYTE;
 		if (raddr + len > fifotop) len = fifotop - raddr;
-		if (vmemap_a64_dma(dma_fd, GetBase64() + raddr, (unsigned int *)buf, len, 0)) {
-//		if (vmemap_a64_blkread(A64UNIT, GetBase64() + raddr, (unsigned int *)buf, len)) {
+		printf("waddr = %X, raddr = %X, len = %X waddr-raddr = %X\n", waddr, raddr, len, waddr - raddr);
+//		if (vmemap_a64_dma(dma_fd, GetBase64() + raddr, (unsigned int *)buf, len, 0)) {
+		if (vmemap_a64_blkread(A64UNIT, GetBase64() + raddr, (unsigned int *)buf, len)) {
 			free(buf);
 			return -4;
 		}
@@ -839,6 +880,7 @@ int uwfd64::TestFifo(int cnt)
 //	control word
 				if (rlen) {
 					errcnt++;
+					eflag++;
 					printf("Error %6d: rlen = %4d  d = %4.4X @raddr = %X, addr = %X, len = %X\n", errcnt, rlen, buf[k], raddr, raddr + 2*k, len);
 				}
 				rlen = buf[k] & 0x1FF;
@@ -849,9 +891,18 @@ int uwfd64::TestFifo(int cnt)
 				rlen--;
 			} else {
 				errcnt++;
+				eflag++;
 				printf("Error %6d: rlen = %4d  d = %4.4X @raddr = %X, addr = %X, len = %X\n", errcnt, rlen, buf[k], raddr, raddr + 2*k, len);				
 			}
 //			printf("%4.4X ", buf[k]);
+		}
+		if (eflag) {
+			for (k = 0; k < len / sizeof(short); k++) {
+				if (!(k & 0xF)) printf("%6X: ", raddr + 2*k);
+				printf("%4.4X ", buf[k]);
+				if ((k & 0xF) == 0xF) printf("\n");
+			}
+			if (k & 0xF) printf("\n");
 		}
 		raddr += len;
 		if (raddr == fifotop) raddr = fifobot;

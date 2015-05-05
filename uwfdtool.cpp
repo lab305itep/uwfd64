@@ -38,6 +38,7 @@ public:
 	void A64Write(long long addr, int val);
 	void ADCRead(int serial, int num, int addr);	
 	void ADCWrite(int serial, int num, int addr, int ival);
+	void Adjust(int serial, int adc);
 	void DACSet(int serial = -1, int val = 0x2000);
 	void I2CRead(int serial, int addr);	
 	void I2CWrite(int serial, int addr, int ival);
@@ -740,6 +741,31 @@ void uwfd64_tool::WriteFile(int serial, char *fname, int size)
 	fclose(f);
 }
 
+void uwfd64_tool::Adjust(int serial, int adc)
+{
+	int i;
+	uwfd64 *ptr;
+	if (serial < 0) {
+		if (adc < 0) {
+			for (i=0; i<N; i++) array[i]->ADCAdjust(0x1FFFF);
+		} else {
+			for (i=0; i<N; i++) array[i]->ADCAdjust((1 << adc) | 0x10000);
+		}
+	} else {
+		ptr = FindSerial(serial);
+		if (ptr == NULL) {
+			printf("Module %d not found.\n", serial);
+			return;
+		}
+		if (adc < 0) {
+			ptr->ADCAdjust(0x1FFFF);
+		} else {
+			ptr->ADCAdjust((1 << adc) | 0x10000);	
+		}
+	}
+}
+
+
 //*************************************************************************************************************************************//
 
 void Help(void)
@@ -773,6 +799,7 @@ void Help(void)
 	printf("\t5 - configure and read back slave clock controller SiLabs Si5338;\n");
 	printf("\t6 - get blocks to fifo and check format (length and CW).\n");
 	printf("U num|* addr [data] - read/write 16-bit word to clock CDCUN1208LP chip using I2C;\n");
+	printf("V num|* [nadc] - scan and adjust input data delays for module num adc nadc or all adc's if omitted\n");
 	printf("X num|* addr [data] - send/receive data from slave Xilinxes via SPI. addr - SPI address.\n");
 }
 
@@ -1096,6 +1123,22 @@ int Process(char *cmd, uwfd64_tool *tool)
 			tool->I2CRead(serial, addr);
 		}
 		break;		
+	case 'V':	// scan/adjust ADC delays
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need module serial number.\n");
+	    		Help();
+	    		break;
+		}
+		serial = (tok[0] == '*') ? -1 : strtol(tok, NULL, 0);
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			ival = -1;
+		} else {
+			ival = strtol(tok, NULL, 0);
+		}
+		tool->Adjust(serial, ival);
+		break;
 	case 'X':	// ICX
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {

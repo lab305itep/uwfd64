@@ -354,12 +354,25 @@ struct uwfd64_a32_reg {
 #define ICX_SLAVE_I2C_DAT	11
 #define ICX_SLAVE_I2C_CSR	12
 
+#define ICX_SLAVE_ADC		64	// start of ADC recievers reg array
+#define ICX_SLAVE_ADC_STEP	16	// shift to the next ADC in this array
+#define ICX_SLAVE_ADC_CSR	0	// relative shifts to ADC reciever regs in each ADC part
+#define ICX_SLAVE_ADC_CFRQ	1	// ADC clock freq counter, high bits
+#define ICX_SLAVE_ADC_CERR	2	// 4 regs of ADC test data error counters
+#define ICX_SLAVE_ADC_IBS	6	// ADC bitslip sticky indicators
+#define ICX_SLAVE_ADC_CINS	7	// 9 regs ADC bit line instability counters, frame and 8 bit lines
+
 #define SLAVE_CSR_TMODE		1
 #define SLAVE_CSR_TLEN		0x10
 #define SLAVE_CSR_TSTART	0x80
-#define SLAVE_CSR_BSDISABLE	0x100
-#define SLAVE_CSR_BSRESET	0x200
 #define SLAVE_CSR_RAW		0x8000
+
+#define SLAVE_ADCCSR_DMASK	0x1FF	// bit mask for IODELAY increments
+#define SLAVE_ADCCSR_DINC	0x200	// IODELAY increment command
+#define SLAVE_ADCCSR_DRST	0x400	// IODELAY reset command
+#define SLAVE_ADCCSR_BSRST	0x800	// SERDES bitslip logic reset
+#define SLAVE_ADCCSR_BSENB	0x1000	// enable individual bitline bitslip
+#define SLAVE_ADCCSR_MBSENB	0x1000	// enable master bitslip for all bits based on frame
 
 #define L2C_TIMEOUT		100
 
@@ -558,6 +571,7 @@ public:
 	uwfd64(int sernum, int gnum, unsigned short *space_a16, unsigned int *space_a32, int fd);
 	int ADCRead(int num, int addr);
 	int ADCWrite(int num, int addr, int val);
+	int ADCAdjust(int adcmask);
 	int ConfigureMasterClock(int sel, int div, int erc = 0);
 	int ConfigureSlaveClock(int num, const char *fname);
 	void EnableFifo(int what);
