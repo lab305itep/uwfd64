@@ -78,39 +78,102 @@ err:
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Executes sequense for various checks (test data error, adc freq, bit instabilities)
+//	time - measurement time = 2**(16 + 2*time) 125 MHz clocks
+//	xilmask - bit mask of xilinxes to be touched
+//	return 0 if OK, negative on error.
+int uwfd64::ADCCheckSeq(int time, int xilmask = 0xF)
+{
+	int i, j, xil, ttype;
+
+	// start measurement
+	for (i=0; i<4; i++) {
+		if (!(xilmask & (1 << i))) continue;
+		xil = ICX_SLAVE_STEP * i;
+		if ((ttype = ICXRead(xil + ICX_SLAVE_CSR_IN)) < 0) return -1;
+		ttype &= 0xF;
+    		if (ICXWrite(xil + ICX_SLAVE_CSR_OUT, SLAVE_CSR_TSTART | (time << 4) | ttype)) return -1;			
+    		if (ICXWrite(xil + ICX_SLAVE_CSR_OUT, (time << 4) | ttype)) return -1;			
+	}
+	// check measurement done
+	for (i=0; i<4; i++) {
+		if (!(xilmask & (1 << i))) continue;
+		xil = ICX_SLAVE_STEP * i;
+    		for (j=0; j<(1<<2*(time+1)); j++) { 
+			if (ICXRead(xil + ICX_SLAVE_CSR_IN) & SLAVE_CSR_TSTART) break; 
+			vmemap_usleep(600); 
+		}
+		if (j == (1<<2*(time+1))) return -2;			
+	}
+	return 0;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //	Scans and adjusts ADC input delays
 //	adcmask - 16 bit mask of module ADCs to be adjusted
 //	adsmask[16] = 1 produces extensive output
 //	return 0 if OK, negative on error.
 int uwfd64::ADCAdjust(int adcmask)
 {
-	int i, xil, adc, irc;
-	const int ftime = 6;
+	int i, j, k, xil, xilmask, adc, irc;
+	const int ftime = 6;	// freq meas time 2 sec
+	const int itime = 2;	// instab meas time 0.5 usec
+	
+
+	// Don't touch x's wich are not involved
+	xilmask = 0;
+	for (i=0; i<4; i++) if (adcmask & (0xF << (4*i))) xilmask |= (1 << i);
 
 	// Check ADC frequency
-	// start freq measurement
-	for (i=0; i<4; i++) {
-		if (!(adcmask & (0xF << (4*i)))) continue;
-		xil = ICX_SLAVE_STEP * i;
-    		if (ICXWrite(xil + ICX_SLAVE_CSR_OUT, SLAVE_CSR_TSTART | (ftime << 4))) return -1;			
-    		if (ICXWrite(xil + ICX_SLAVE_CSR_OUT, (ftime << 4))) return -1;			
-	}
-	// check measurement done
-	for (i=0; i<4; i++) {
-		if (!(adcmask & (0xF << (4*i)))) continue;
-		xil = ICX_SLAVE_STEP * i;
-    		while (!(ICXRead(xil + ICX_SLAVE_CSR_IN) & SLAVE_CSR_TSTART));			
-	}
+	if (irc = ADCCheckSeq(ftime, xilmask)) return irc;
 	// read freq result
-	if (adcmask & 0x10000) printf("ADC Freqs: ");
+	if (adcmask & 0x10000) printf("ADC Freq deviations: ");
 	for (i=0; i<16; i++) {
 		if (!(adcmask & (1 << i))) continue;
 		adc = ICX_SLAVE_STEP * (i >> 2) + ICX_SLAVE_ADC + ICX_SLAVE_ADC_STEP * (i & 3);
 		irc = ICXRead(adc + ICX_SLAVE_ADC_CFRQ);		 
-		if (adcmask & 0x10000) printf(" %X=%.2f", i, 125.0 * irc / (double)(1 << 2*ftime));
-		if (labs(irc - (1 << 2*ftime)) > 2) return -10-i;
+		if (adcmask & 0x10000) printf(" %X=%.1f%%", i, (irc - (1 << 2*ftime)) / ((double)(1 << 2*ftime)) * 100.0);
+		// check frequency is sane (actually must be well below 100 ppm)
+// ???		if (labs(irc - (1 << 2*ftime)) > 2) return -10-i;
 	}	
 	if (adcmask & 0x10000) printf("\n");
+
+	// reset IODELAY and SERDES bitslip and disable it, also program ADC itself to produce 000111 data pattern
+	for (i=0; i<16; i++) {
+		if (!(adcmask & (1 << i))) continue;
+		adc = ICX_SLAVE_STEP * (i >> 2) + ICX_SLAVE_ADC + ICX_SLAVE_ADC_STEP * (i & 3);
+		// 0xE38 = b111000111000, same as frame in bytewise 1xFrame mode
+		if (ADCWrite(i, ADC_REG_PAT1L, 0x38)) return -3;		 
+		if (ADCWrite(i, ADC_REG_PAT1H, 0x0E)) return -3;		 
+		if (ADCWrite(i, ADC_REG_TEST, ADC_TEST_USER)) return -3;		 
+		// IODELAY calibrate, SERDES reset (and disable bitslip)
+		if (ICXWrite(adc + ICX_SLAVE_ADC_CSR, SLAVE_ADCCSR_DCAL | SLAVE_ADCCSR_BSRST)) return -3;
+		// IODELAY reset (and disable bitslip)
+		if (ICXWrite(adc + ICX_SLAVE_ADC_CSR, SLAVE_ADCCSR_DRST)) return -3;
+	}
+	
+	// Test stability while incrementing IODELAY 256 steps
+	for (j=0; j<80; j++) {
+		// seq instability measurement
+		if (irc = ADCCheckSeq(itime, xilmask)) return irc;
+		// read counters and increment IODELAY
+		for (i=0; i<16; i++) {
+			if (!(adcmask & (1 << i))) continue;
+			adc = ICX_SLAVE_STEP * (i >> 2) + ICX_SLAVE_ADC + ICX_SLAVE_ADC_STEP * (i & 3);
+			for (k=0; k<9; k++) {			
+				irc = ICXRead(adc + ICX_SLAVE_ADC_CINS + k);		 
+				if (adcmask & 0x10000) {
+					printf("%c", (irc) ? '*' : '.');
+//					printf("%X", irc & 0xF);
+				}
+			}
+			if (adcmask & 0x10000) printf(" ");
+			// increment IODELAY for all bits and frame
+			if (ICXWrite(adc + ICX_SLAVE_ADC_CSR, SLAVE_ADCCSR_DINC | 0x1FF)) return -3;
+		}
+		if (adcmask & 0x10000) printf("\n");
+	}	
+		
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -869,8 +932,8 @@ if (k & 8) {printf("debug = %8.8X\n", a32->fifo.win);}
 		if (len > MBYTE) len = MBYTE;
 		if (raddr + len > fifotop) len = fifotop - raddr;
 		printf("waddr = %X, raddr = %X, len = %X waddr-raddr = %X\n", waddr, raddr, len, waddr - raddr);
-//		if (vmemap_a64_dma(dma_fd, GetBase64() + raddr, (unsigned int *)buf, len, 0)) {
-		if (vmemap_a64_blkread(A64UNIT, GetBase64() + raddr, (unsigned int *)buf, len)) {
+		if (vmemap_a64_dma(dma_fd, GetBase64() + raddr, (unsigned int *)buf, len, 0)) {
+//		if (vmemap_a64_blkread(A64UNIT, GetBase64() + raddr, (unsigned int *)buf, len)) {
 			free(buf);
 			return -4;
 		}

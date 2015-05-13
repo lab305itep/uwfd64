@@ -372,7 +372,8 @@ struct uwfd64_a32_reg {
 #define SLAVE_ADCCSR_DRST	0x400	// IODELAY reset command
 #define SLAVE_ADCCSR_BSRST	0x800	// SERDES bitslip logic reset
 #define SLAVE_ADCCSR_BSENB	0x1000	// enable individual bitline bitslip
-#define SLAVE_ADCCSR_MBSENB	0x1000	// enable master bitslip for all bits based on frame
+#define SLAVE_ADCCSR_MBSENB	0x2000	// enable master bitslip for all bits based on frame
+#define SLAVE_ADCCSR_DCAL	0x4000	// IODELAY calibrate command
 
 #define L2C_TIMEOUT		100
 
@@ -571,6 +572,7 @@ public:
 	uwfd64(int sernum, int gnum, unsigned short *space_a16, unsigned int *space_a32, int fd);
 	int ADCRead(int num, int addr);
 	int ADCWrite(int num, int addr, int val);
+	int ADCCheckSeq(int time, int xilmask);
 	int ADCAdjust(int adcmask);
 	int ConfigureMasterClock(int sel, int div, int erc = 0);
 	int ConfigureSlaveClock(int num, const char *fname);
