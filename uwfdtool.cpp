@@ -76,6 +76,7 @@ uwfd64_tool::uwfd64_tool(void)
 		array[N] = ptr;
 		N++;
 	}
+	ReadConfig((char *)"uwfdtool.conf");
 }
 
 uwfd64_tool::~uwfd64_tool(void)
@@ -560,6 +561,11 @@ void uwfd64_tool::ReadConfig(char *fname)
 		tmp &= 0xFFFF;
 		for (i=0; i<N; i++) array[i]->Conf.FifoEnd = tmp;
 	}
+//	int IODelay;		// ADC data delay in calibrated delay taps
+	if (config_lookup_int(&cnf, "Def.IODelay", &tmp)) {
+		tmp &= 0x3F;
+		for (i=0; i<N; i++) array[i]->Conf.IODelay = tmp;
+	}
 
 //		Read individual settings
 	for (i=0; i<N; i++) {
@@ -634,6 +640,12 @@ void uwfd64_tool::ReadConfig(char *fname)
 		if (config_lookup_int(&cnf, str, &tmp)) {
 			tmp &= 0xFFFF;
 			array[i]->Conf.FifoEnd = tmp;
+		}
+//	int IODelay;		// ADC data delay in calibrated delay taps
+		sprintf(str, "Dev%3.3d.IODelay", array[i]->GetSerial());
+		if (config_lookup_int(&cnf, str, &tmp)) {
+			tmp &= 0x3F;
+			array[i]->Conf.IODelay = tmp;
 		}
 	}
 }
@@ -747,9 +759,9 @@ void uwfd64_tool::Adjust(int serial, int adc)
 	uwfd64 *ptr;
 	if (serial < 0) {
 		if (adc < 0) {
-			for (i=0; i<N; i++) array[i]->ADCAdjust(0x1FFFF);
+			for (i=0; i<N; i++) array[i]->ADCAdjust(0x3FFFF);
 		} else {
-			for (i=0; i<N; i++) array[i]->ADCAdjust((1 << adc) | 0x10000);
+			for (i=0; i<N; i++) array[i]->ADCAdjust((1 << adc) | 0x30000);
 		}
 	} else {
 		ptr = FindSerial(serial);
@@ -758,9 +770,9 @@ void uwfd64_tool::Adjust(int serial, int adc)
 			return;
 		}
 		if (adc < 0) {
-			ptr->ADCAdjust(0x1FFFF);
+			ptr->ADCAdjust(0x3FFFF);
 		} else {
-			ptr->ADCAdjust((1 << adc) | 0x10000);	
+			ptr->ADCAdjust((1 << adc) | 0x30000);	
 		}
 	}
 }

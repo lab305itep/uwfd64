@@ -370,10 +370,10 @@ struct uwfd64_a32_reg {
 #define SLAVE_ADCCSR_DMASK	0x1FF	// bit mask for IODELAY increments
 #define SLAVE_ADCCSR_DINC	0x200	// IODELAY increment command
 #define SLAVE_ADCCSR_DRST	0x400	// IODELAY reset command
-#define SLAVE_ADCCSR_BSRST	0x800	// SERDES bitslip logic reset
-#define SLAVE_ADCCSR_BSENB	0x1000	// enable individual bitline bitslip
-#define SLAVE_ADCCSR_MBSENB	0x2000	// enable master bitslip for all bits based on frame
-#define SLAVE_ADCCSR_DCAL	0x4000	// IODELAY calibrate command
+#define SLAVE_ADCCSR_DCAL	0x800	// IODELAY calibrate command
+#define SLAVE_ADCCSR_BSRST	0x1000	// SERDES bitslip logic reset
+#define SLAVE_ADCCSR_BSENB	0x2000	// enable individual bitline bitslip
+#define SLAVE_ADCCSR_MBSENB	0x4000	// enable master bitslip for all bits based on frame
 
 #define L2C_TIMEOUT		100
 
@@ -555,6 +555,7 @@ struct uwfd64_module_config {
 	int TrigUserWord;	// 15-bit user word to be put to trigger block
 	int FifoBegin;		// Main FIFO start address in 8k blocks
 	int FifoEnd;		// Main FIFO end address in 8k blocks
+	int IODelay;		// ADC data delay in calibrated delay taps
 };
 
 //************************************************************************************************************************************************************************//
