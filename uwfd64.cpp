@@ -12,7 +12,7 @@
 #include "uwfd64.h"
 
 //	Constructor - only set addresses here
-uwfd64::uwfd64(int sernum, int gnum, unsigned short *space_a16, unsigned int *space_a32, int fd)
+uwfd64::uwfd64(int sernum, int gnum, unsigned short *space_a16, unsigned int *space_a32, int fd, config_t *cnf)
 {
 	int s, i;
 
@@ -24,6 +24,7 @@ uwfd64::uwfd64(int sernum, int gnum, unsigned short *space_a16, unsigned int *sp
 	// initial configuration - empty
 	memset(&Conf, 0, sizeof(Conf));
 	Conf.FifoEnd = 1;	// minimum FIFO size of 8kBytes
+	if (cnf) ReadConfig(cnf);
 	// Set base address for A32 - emulate geographic and its parity
 	s = 0;
 	for (i=0; i<5; i++) if (ga & (1 << i)) s++;
@@ -697,9 +698,8 @@ int uwfd64::Init(void)
 	// ADC output offset binary
 	for (i=0; i<16; i++) if(ADCWrite(i, ADC_REG_OUTPUT, 0)) errcnt++;
 	// Activate bitslip
-//	for (i=0; i<4; i++) if(ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_CSR_OUT, SLAVE_CSR_BSDISABLE + SLAVE_CSR_BSRESET)) errcnt++;
-//	for (i=0; i<4; i++) if(ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_CSR_OUT, SLAVE_CSR_BSDISABLE)) errcnt++;
 	for (i=0; i<4; i++) if(ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_CSR_OUT, 0)) errcnt++;
+	if (ADCAdjust()) errcnt++;
 	return errcnt;
 }
 
@@ -922,6 +922,104 @@ int uwfd64::Prog(char *fname)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Get Def and module configuration data from config_t structure
+void uwfd64::ReadConfig(config_t *cnf)
+{
+    	long tmp;
+    	double dtmp;
+    	char *stmp;
+    	char str[1024];
+	char sect[16];
+	int i;
+	
+	for (i=0; i<2; i++) {
+		if (i) {
+			sprintf(sect, "Dev%3.3d", GetSerial());
+		} else {
+			strcpy(sect, "Def");
+		}
+//	int MasterClockMux;	// master clock multiplexer setting 
+		sprintf(str, "%s.MasterClockMux", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp &= MAIN_MUX_MASK;
+			Conf.MasterClockMux = tmp;
+		}
+//	int MasterTrigMux;	// master trigger multiplexer setting 
+		sprintf(str, "%s.MasterTrigMux", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp &= MAIN_MUX_MASK;
+			Conf.MasterTrigMux = tmp;
+		}
+//	int MasterInhMux;	// master inhibit multiplexer setting
+		sprintf(str, "%s.MasterInhMux", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp &= MAIN_MUX_MASK;
+			Conf.MasterInhMux = tmp;
+		}
+//	int MasterClockDiv;	// Mater clock divider (0 - 1, 1 - 2, 2 - 4, 3 - 8)
+		sprintf(str, "%s.MasterClockDiv", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp &= 3;
+			Conf.MasterClockDiv = tmp;
+		}
+//	int MasterClockErc;	// Mater clock edge control (0 - fast, 1 - medium, 2 - slow)
+		sprintf(str, "%s.MasterClockErc", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp %= 3;
+			Conf.MasterClockErc = tmp;
+		}
+//	char SlaveClockFile[MAX_PATH_LEN];	// Si5338 .h configuration file
+		sprintf(str, "%s.SlaveClockFile", sect);
+		if (config_lookup_string(cnf, str, (const char **) &stmp)) 
+			strncpy(Conf.SlaveClockFile, stmp, MAX_PATH_LEN);
+//	int DAC;		// DAC setting
+		sprintf(str, "%s.DAC", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp &= 0xFFFF;
+			Conf.DAC = tmp;
+		}
+//	int TrigGenMask;	// Mask of slave xilinxes participating in trigger generation
+		sprintf(str, "%s.TrigGenMask", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			Conf.TrigGenMask = tmp;
+		}
+//	int TrigOrTime;		// Number of clocks to OR trigger sources
+		sprintf(str, "%s.TrigOrTime", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			Conf.TrigOrTime = tmp;
+		}
+//	int TrigBlkTime;	// Number of clocks to block trigger production
+		sprintf(str, "%s.TrigBlkTime", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			Conf.TrigBlkTime = tmp;
+		}
+//	int TrigUserWord;	// 15-bit user word to be put to trigger block
+		sprintf(str, "%s.TrigUserWord", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			Conf.TrigUserWord = tmp;
+		}
+//	int FifoBegin;		// Main FIFO start address in 8k blocks
+		sprintf(str, "%s.FifoBegin", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp &= 0xFFFF;
+			Conf.FifoBegin = tmp;
+		}
+//	int FifoEnd;		// Main FIFO end address in 8k blocks
+		sprintf(str, "%s.FifoEnd", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp &= 0xFFFF;
+			Conf.FifoEnd = tmp;
+		}
+//	int IODelay;		// ADC data delay in calibrated delay taps
+		sprintf(str, "%s.IODelay", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp &= 0x3F;
+			Conf.IODelay = tmp;
+		}
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //	Module soft reset
 void uwfd64::Reset(void) 
 {
@@ -1010,8 +1108,8 @@ int uwfd64::TestFifo(int cnt)
 		blkcnt = 0;
 		eflag = 0;
 		if ((k=a32->fifo.csr) & FIFO_CSR_ERROR) {
-printf("error in fifoCSR: %8.8X(%8.8X)\n", a32->fifo.csr, k);
-if (k & 8) {printf("debug = %8.8X\n", a32->fifo.win);}
+// printf("error in fifoCSR: %8.8X(%8.8X)\n", a32->fifo.csr, k);
+// if (k & 8) {printf("debug = %8.8X\n", a32->fifo.win);}
 			free(buf);
 			return -2;
 		}

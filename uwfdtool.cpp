@@ -61,6 +61,8 @@ public:
 uwfd64_tool::uwfd64_tool(void)
 {
 	uwfd64 *ptr;	
+	config_t cnf;
+	config_t *pcnf;
 	int i;
 
 	N = 0;
@@ -70,13 +72,20 @@ uwfd64_tool::uwfd64_tool(void)
 	dma_fd = vmedma_open();
 	if (!IsOK()) return;
 
+	pcnf = &cnf;
+	config_init(pcnf);
+	if (config_read_file(pcnf, "uwfdtool.conf") != CONFIG_TRUE) {
+        	printf("Configuration error in file wfdtool.conf at line %d: %s\n", 
+        		config_error_line(pcnf), config_error_text(pcnf));
+            	pcnf = NULL;
+    	}
+
 	for (i = 0; i < 255 && N < 20; i++) {
-		ptr = new uwfd64(i, N + 2, a16, a32, dma_fd);
+		ptr = new uwfd64(i, N + 2, a16, a32, dma_fd, pcnf);
 		if (!ptr->IsHere()) continue;
 		array[N] = ptr;
 		N++;
 	}
-	ReadConfig((char *)"uwfdtool.conf");
 }
 
 uwfd64_tool::~uwfd64_tool(void)
@@ -230,6 +239,30 @@ void uwfd64_tool::ADCWrite(int serial, int num, int addr, int val)
 	}
 }
 
+void uwfd64_tool::Adjust(int serial, int adc)
+{
+	int i;
+	uwfd64 *ptr;
+	if (serial < 0) {
+		if (adc < 0) {
+			for (i=0; i<N; i++) array[i]->ADCAdjust(0x3FFFF);
+		} else {
+			for (i=0; i<N; i++) array[i]->ADCAdjust((1 << adc) | 0x30000);
+		}
+	} else {
+		ptr = FindSerial(serial);
+		if (ptr == NULL) {
+			printf("Module %d not found.\n", serial);
+			return;
+		}
+		if (adc < 0) {
+			ptr->ADCAdjust(0x3FFFF);
+		} else {
+			ptr->ADCAdjust((1 << adc) | 0x30000);	
+		}
+	}
+}
+
 void uwfd64_tool::DACSet(int serial, int val)
 {
 	int i;
@@ -279,6 +312,14 @@ int uwfd64_tool::DoTest(uwfd64 *ptr, int type, int cnt)
 		break;
 	}
 	return irc;
+}
+
+uwfd64 *uwfd64_tool::FindSerial(int num)
+{
+	int i;
+	for (i=0; i<N; i++) if (array[i]->GetSerial() == num) break;
+	if (i == N) return NULL;
+	return array[i];
 }
 
 void uwfd64_tool::I2CRead(int serial, int addr)
@@ -371,14 +412,6 @@ void uwfd64_tool::ICXWrite(int serial, int addr, int val)
 	}
 }
 
-uwfd64 *uwfd64_tool::FindSerial(int num)
-{
-	int i;
-	for (i=0; i<N; i++) if (array[i]->GetSerial() == num) break;
-	if (i == N) return NULL;
-	return array[i];
-}
-
 void uwfd64_tool::Inhibit(int serial, int what)
 {
 	int i;
@@ -399,15 +432,22 @@ void uwfd64_tool::Init(int serial)
 {
 	int i;
 	uwfd64 *ptr;
+	int errcnt;
+	errcnt = 0;
 	if (serial < 0) {
-		for (i=0; i<N; i++) array[i]->Init();
+		for (i=0; i<N; i++) errcnt += array[i]->Init();
 	} else {
 		ptr = FindSerial(serial);
 		if (ptr == NULL) {
 			printf("Module %d not found.\n", serial);
 			return;
 		}
-		ptr->Init();
+		errcnt += ptr->Init();
+	}
+	if (errcnt) {
+		printf("Initialization: %d errors found.\n", errcnt);
+	} else {
+		printf("Initialization done. No errors.\n");
 	}
 }
 
@@ -489,10 +529,6 @@ void uwfd64_tool::Prog(int serial, char *fname)
 void uwfd64_tool::ReadConfig(char *fname)
 {
 	config_t cnf;
-    	long tmp;
-    	double dtmp;
-    	char *stmp;
-    	char str[1024];
 	int i;
 
 	config_init(&cnf);
@@ -501,153 +537,7 @@ void uwfd64_tool::ReadConfig(char *fname)
         		fname, config_error_line(&cnf), config_error_text(&cnf));
             	return;
     	}
-//		Read common settings
-//	int MasterClockMux;	// master clock multiplexer setting 
-	if (config_lookup_int(&cnf, "Def.MasterClockMux", &tmp)) {
-		tmp &= MAIN_MUX_MASK;
-		for (i=0; i<N; i++) array[i]->Conf.MasterClockMux = tmp;
-	}
-//	int MasterTrigMux;	// master trigger multiplexer setting 
-	if (config_lookup_int(&cnf, "Def.MasterTrigMux", &tmp)) {
-		tmp &= MAIN_MUX_MASK;
-		for (i=0; i<N; i++) array[i]->Conf.MasterTrigMux = tmp;
-	}
-//	int MasterInhMux;	// master inhibit multiplexer setting
-	if (config_lookup_int(&cnf, "Def.MasterInhMux", &tmp)) {
-		tmp &= MAIN_MUX_MASK;
-		for (i=0; i<N; i++) array[i]->Conf.MasterInhMux = tmp;
-	}
-//	int MasterClockDiv;	// Mater clock divider (0 - 1, 1 - 2, 2 - 4, 3 - 8)
-	if (config_lookup_int(&cnf, "Def.MasterClockDiv", &tmp)) {
-		tmp &= 3;
-		for (i=0; i<N; i++) array[i]->Conf.MasterClockDiv = tmp;
-	}
-//	int MasterClockErc;	// Mater clock edge control (0 - fast, 1 - medium, 2 - slow)
-	if (config_lookup_int(&cnf, "Def.MasterClockErc", &tmp)) {
-		tmp %= 3;
-		for (i=0; i<N; i++) array[i]->Conf.MasterClockErc = tmp;
-	}
-//	char SlaveClockFile[MAX_PATH_LEN];	// Si5338 .h configuration file
-	if (config_lookup_string(&cnf, "Def.SlaveClockFile", (const char **) &stmp)) 
-		for (i=0; i<N; i++) strncpy(array[i]->Conf.SlaveClockFile, stmp, MAX_PATH_LEN);
-//	int DAC;		// DAC setting
-	if (config_lookup_int(&cnf, "Def.DAC", &tmp)) {
-		tmp &= 0xFFFF;
-		for (i=0; i<N; i++) array[i]->Conf.DAC = tmp;
-	}
-//	int TrigGenMask;	// Mask of slave xilinxes participating in trigger generation
-	if (config_lookup_int(&cnf, "Def.TrigGenMask", &tmp)) {
-		for (i=0; i<N; i++) array[i]->Conf.TrigGenMask = tmp;
-	}
-//	int TrigOrTime;		// Number of clocks to OR trigger sources
-	if (config_lookup_int(&cnf, "Def.TrigOrTime", &tmp)) {
-		for (i=0; i<N; i++) array[i]->Conf.TrigOrTime = tmp;
-	}
-//	int TrigBlkTime;	// Number of clocks to block trigger production
-	if (config_lookup_int(&cnf, "Def.TrigBlkTime", &tmp)) {
-		for (i=0; i<N; i++) array[i]->Conf.TrigBlkTime = tmp;
-	}
-//	int TrigUserWord;	// 15-bit user word to be put to trigger block
-	if (config_lookup_int(&cnf, "Def.TrigUserWord", &tmp)) {
-		for (i=0; i<N; i++) array[i]->Conf.TrigUserWord = tmp;
-	}
-//	int FifoBegin;		// Main FIFO start address in 8k blocks
-	if (config_lookup_int(&cnf, "Def.FifoBegin", &tmp)) {
-		tmp &= 0xFFFF;
-		for (i=0; i<N; i++) array[i]->Conf.FifoBegin = tmp;
-	}
-//	int FifoEnd;		// Main FIFO end address in 8k blocks
-	if (config_lookup_int(&cnf, "Def.FifoEnd", &tmp)) {
-		tmp &= 0xFFFF;
-		for (i=0; i<N; i++) array[i]->Conf.FifoEnd = tmp;
-	}
-//	int IODelay;		// ADC data delay in calibrated delay taps
-	if (config_lookup_int(&cnf, "Def.IODelay", &tmp)) {
-		tmp &= 0x3F;
-		for (i=0; i<N; i++) array[i]->Conf.IODelay = tmp;
-	}
-
-//		Read individual settings
-	for (i=0; i<N; i++) {
-//	int MasterClockMux;	// master clock multiplexer setting 
-		sprintf(str, "Dev%3.3d.MasterClockMux", array[i]->GetSerial());
-		if (config_lookup_int(&cnf, str, &tmp)) {
-			tmp &= MAIN_MUX_MASK;
-			array[i]->Conf.MasterClockMux = tmp;
-		}
-//	int MasterTrigMux;	// master trigger multiplexer setting 
-		sprintf(str, "Dev%3.3d.MasterTrigMux", array[i]->GetSerial());
-		if (config_lookup_int(&cnf, str, &tmp)) {
-			tmp &= MAIN_MUX_MASK;
-			array[i]->Conf.MasterTrigMux = tmp;
-		}
-//	int MasterInhMux;	// master inhibit multiplexer setting
-		sprintf(str, "Dev%3.3d.MasterInhMux", array[i]->GetSerial());
-		if (config_lookup_int(&cnf, str, &tmp)) {
-			tmp &= MAIN_MUX_MASK;
-			array[i]->Conf.MasterInhMux = tmp;
-		}
-//	int MasterClockDiv;	// Mater clock divider (0 - 1, 1 - 2, 2 - 4, 3 - 8)
-		sprintf(str, "Dev%3.3d.MasterClockDiv", array[i]->GetSerial());
-		if (config_lookup_int(&cnf, str, &tmp)) {
-			tmp &= 3;
-			array[i]->Conf.MasterClockDiv = tmp;
-		}
-//	int MasterClockErc;	// Mater clock edge control (0 - fast, 1 - medium, 2 - slow)
-		sprintf(str, "Dev%3.3d.MasterClockErc", array[i]->GetSerial());
-		if (config_lookup_int(&cnf, str, &tmp)) {
-			tmp %= 3;
-			array[i]->Conf.MasterClockErc = tmp;
-		}
-//	char SlaveClockFile[MAX_PATH_LEN];	// Si5338 .h configuration file
-		sprintf(str, "Dev%3.3d.SlaveClockFile", array[i]->GetSerial());
-		if (config_lookup_string(&cnf, str, (const char **) &stmp)) 
-			strncpy(array[i]->Conf.SlaveClockFile, stmp, MAX_PATH_LEN);
-//	int DAC;		// DAC setting
-		sprintf(str, "Dev%3.3d.DAC", array[i]->GetSerial());
-		if (config_lookup_int(&cnf, str, &tmp)) {
-			tmp &= 0xFFFF;
-			array[i]->Conf.DAC = tmp;
-		}
-//	int TrigGenMask;	// Mask of slave xilinxes participating in trigger generation
-		sprintf(str, "Dev%3.3d.TrigGenMask", array[i]->GetSerial());
-		if (config_lookup_int(&cnf, str, &tmp)) {
-			array[i]->Conf.TrigGenMask = tmp;
-		}
-//	int TrigOrTime;		// Number of clocks to OR trigger sources
-		sprintf(str, "Dev%3.3d.TrigOrTime", array[i]->GetSerial());
-		if (config_lookup_int(&cnf, str, &tmp)) {
-			array[i]->Conf.TrigOrTime = tmp;
-		}
-//	int TrigBlkTime;	// Number of clocks to block trigger production
-		sprintf(str, "Dev%3.3d.TrigBlkTime", array[i]->GetSerial());
-		if (config_lookup_int(&cnf, str, &tmp)) {
-			array[i]->Conf.TrigBlkTime = tmp;
-		}
-//	int TrigUserWord;	// 15-bit user word to be put to trigger block
-		sprintf(str, "Dev%3.3d.TrigUserWord", array[i]->GetSerial());
-		if (config_lookup_int(&cnf, str, &tmp)) {
-			array[i]->Conf.TrigUserWord = tmp;
-		}
-//	int FifoBegin;		// Main FIFO start address in 8k blocks
-		sprintf(str, "Dev%3.3d.FifoBegin", array[i]->GetSerial());
-		if (config_lookup_int(&cnf, str, &tmp)) {
-			tmp &= 0xFFFF;
-			array[i]->Conf.FifoBegin = tmp;
-		}
-//	int FifoEnd;		// Main FIFO end address in 8k blocks
-		sprintf(str, "Dev%3.3d.FifoEnd", array[i]->GetSerial());
-		if (config_lookup_int(&cnf, str, &tmp)) {
-			tmp &= 0xFFFF;
-			array[i]->Conf.FifoEnd = tmp;
-		}
-//	int IODelay;		// ADC data delay in calibrated delay taps
-		sprintf(str, "Dev%3.3d.IODelay", array[i]->GetSerial());
-		if (config_lookup_int(&cnf, str, &tmp)) {
-			tmp &= 0x3F;
-			array[i]->Conf.IODelay = tmp;
-		}
-	}
+	for (i=0; i<N; i++) array[i]->ReadConfig(&cnf);
 }
 
 void uwfd64_tool::SoftTrigger(int serial, int freq)
@@ -752,31 +642,6 @@ void uwfd64_tool::WriteFile(int serial, char *fname, int size)
 	free(buf);
 	fclose(f);
 }
-
-void uwfd64_tool::Adjust(int serial, int adc)
-{
-	int i;
-	uwfd64 *ptr;
-	if (serial < 0) {
-		if (adc < 0) {
-			for (i=0; i<N; i++) array[i]->ADCAdjust(0x3FFFF);
-		} else {
-			for (i=0; i<N; i++) array[i]->ADCAdjust((1 << adc) | 0x30000);
-		}
-	} else {
-		ptr = FindSerial(serial);
-		if (ptr == NULL) {
-			printf("Module %d not found.\n", serial);
-			return;
-		}
-		if (adc < 0) {
-			ptr->ADCAdjust(0x3FFFF);
-		} else {
-			ptr->ADCAdjust((1 << adc) | 0x30000);	
-		}
-	}
-}
-
 
 //*************************************************************************************************************************************//
 

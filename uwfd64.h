@@ -5,6 +5,8 @@
 #ifndef UWFD64_H
 #define UWFD64_H
 
+#include <libconfig.h>
+
 #define MAX_PATH_LEN	1024
 
 //************************************************************************************************************************************************************************//
@@ -570,7 +572,7 @@ private:
 	int dma_fd;
 	struct uwfd64_module_config Conf;
 public:
-	uwfd64(int sernum, int gnum, unsigned short *space_a16, unsigned int *space_a32, int fd);
+	uwfd64(int sernum, int gnum, unsigned short *space_a16, unsigned int *space_a32, int fd, config_t *cnf = NULL);
 	int ADCRead(int num, int addr);
 	int ADCWrite(int num, int addr, int val);
 	int ADCCheckSeq(int time, int xilmask);
@@ -602,6 +604,7 @@ public:
 	int L2CRead(int num, int addr);
 	int L2CWrite(int num, int addr, int val);
 	int Prog(char *fname = NULL);
+	void ReadConfig(config_t *cnf);
 	void Reset(void);
 	void ResetFifo(int mask = FIFO_CSR_HRESET | FIFO_CSR_SRESET);
 	void SoftTrigger(int freq);

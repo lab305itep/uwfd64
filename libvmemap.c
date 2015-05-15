@@ -189,7 +189,7 @@ int vmemap_a64_dma(
 	dma.buf_vaddr = (unsigned long) data;
 	dma.count = len;
 	dma.write = rw;
-	printf("vma_addr = %LX   user_addr = %LX   len = %X\n", dma.vme_addr, dma.buf_vaddr, dma.count);
+//	printf("vma_addr = %LX   user_addr = %LX   len = %X\n", dma.vme_addr, dma.buf_vaddr, dma.count);
 	if (ioctl(fd, VME_DMA_OP, &dma) != len) return -1;
 	return 0;
 }
