@@ -145,7 +145,10 @@ int uwfd64::ADCAdjust(int adcmask = 0xFFFF)
 		irc = ICXRead(adc + ICX_SLAVE_ADC_CFRQ);
 		if (adcmask & 0x10000) printf("%8.1f%% ", (irc - (1 << (2*ftime+11))) / ((double)(1 << (2*ftime+11))) * 100.0);
 		// check frequency is sane (actually must be well below 100 ppm)
-		if (labs(irc - (1 << (2*ftime+11))) > 2) return -10-i;
+		if (labs(irc - (1 << (2*ftime+11))) > 2) {
+			if (adcmask & 0x10000) printf("\n");
+			return -10-i;
+		}
 	}	
 	if (adcmask & 0x10000) printf("\n");
 
@@ -184,7 +187,10 @@ int uwfd64::ADCAdjust(int adcmask = 0xFFFF)
 				if (adcmask & 0x10000) {
 					printf("%c", (irc) ? '*' : '.');
 				}
-				if (irc && (j >= Conf.IODelay-5) && (j <= Conf.IODelay+5)) return -30-i;
+				if (irc && (j >= Conf.IODelay-5) && (j <= Conf.IODelay+5)) {
+					if (adcmask & 0x10000) printf("\n");
+					return -30-i;
+				}
 			}
 			if (adcmask & 0x10000) printf(" ");
 			// increment IODELAY for all bits and frame
@@ -263,7 +269,10 @@ int uwfd64::ADCAdjust(int adcmask = 0xFFFF)
 		for (k=0; k<4; k++) {
 			irc = ICXRead(adc + ICX_SLAVE_ADC_CERR + k);
 			if (adcmask & 0x10000) printf(" %1X", irc & 0xF);
-			if (irc) return -70-i;
+			if (irc) {
+				if (adcmask & 0x10000) printf("\n");
+				return -70-i;
+			}
 		}
 		if (adcmask & 0x10000) printf("  ");
 	}
@@ -693,12 +702,15 @@ int uwfd64::Init(void)
 	}
 	// ADC power up
 	for (i=0; i<16; i++) if(ADCWrite(i, ADC_REG_PWR, 0)) errcnt++;
-	// ADC Reset
+	// ADC power reset on
+	for (i=0; i<16; i++) if(ADCWrite(i, ADC_REG_PWR, ADC_PWR_RESET)) errcnt++;
+	// ADC power reset off
+	for (i=0; i<16; i++) if(ADCWrite(i, ADC_REG_PWR, 0)) errcnt++;
+	// ADC software Reset
 	for (i=0; i<16; i++) if(ADCWrite(i, ADC_REG_CFG, ADC_CFG_RESET)) errcnt++;
 	// ADC output offset binary
 	for (i=0; i<16; i++) if(ADCWrite(i, ADC_REG_OUTPUT, 0)) errcnt++;
-	// Activate bitslip
-	for (i=0; i<4; i++) if(ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_CSR_OUT, 0)) errcnt++;
+	// ADC input adjust
 	if (ADCAdjust()) errcnt++;
 	return errcnt;
 }
