@@ -433,9 +433,18 @@ void uwfd64_tool::Init(int serial)
 	int i;
 	uwfd64 *ptr;
 	int errcnt;
+	int irc;
+
 	errcnt = 0;
 	if (serial < 0) {
-		for (i=0; i<N; i++) errcnt += array[i]->Init();
+		printf("Init: ");
+		for (i=0; i<N; i++) {
+			irc = array[i]->Init();
+			errcnt += irc;
+			printf("%3d:%3s ", array[i]->GetSerial(), (irc) ? "Bad" : "OK");
+			fflush(stdout);
+		}
+		printf("\n");
 	} else {
 		ptr = FindSerial(serial);
 		if (ptr == NULL) {
@@ -513,8 +522,18 @@ void uwfd64_tool::Prog(int serial, char *fname)
 	int i;
 	uwfd64 *ptr;
 	if (serial < 0) {
-		for (i=0; i<N; i++) array[i]->Prog(fname);
-		for (i=0; i<N; i++) array[i]->IsDone(WAIT4DONE);	// 10 s
+		printf("Modules: ");
+		for (i=0; i<N; i++) {
+			array[i]->Prog(fname);
+			printf("%3d ", array[i]->GetSerial());
+			fflush(stdout);
+		}
+		printf("\n   Done: ");
+		for (i=0; i<N; i++) {
+			printf("%3s ", (array[i]->IsDone(WAIT4DONE)) ? "Yes" : "No");	// 10 s
+			fflush(stdout);
+		}
+		printf("\n");
 	} else {
 		ptr = FindSerial(serial);
 		if (ptr == NULL) {
@@ -522,7 +541,7 @@ void uwfd64_tool::Prog(int serial, char *fname)
 			return;
 		}
 		ptr->Prog(fname);
-		ptr->IsDone(WAIT4DONE);	// 10 s
+		printf("Done: %4s\n", (ptr->IsDone(WAIT4DONE)) ? "Yes" : "No");	// 10 s
 	}
 }
 

@@ -1137,8 +1137,8 @@ int uwfd64::TestFifo(int cnt)
 		if (len > MBYTE) len = MBYTE;
 		if (raddr + len > fifotop) len = fifotop - raddr;
 		printf("waddr = %X, raddr = %X, len = %X waddr-raddr = %X\n", waddr, raddr, len, waddr - raddr);
-		if (vmemap_a64_dma(dma_fd, GetBase64() + raddr, (unsigned int *)buf, len, 0)) {
-//		if (vmemap_a64_blkread(A64UNIT, GetBase64() + raddr, (unsigned int *)buf, len)) {
+//		if (vmemap_a64_dma(dma_fd, GetBase64() + raddr, (unsigned int *)buf, len, 0)) {
+		if (vmemap_a64_blkread(A64UNIT, GetBase64() + raddr, (unsigned int *)buf, len)) {
 			free(buf);
 			return -4;
 		}
@@ -1165,7 +1165,18 @@ int uwfd64::TestFifo(int cnt)
 //			printf("%4.4X ", buf[k]);
 		}
 		if (eflag) {
-			for (k = 0; k < len / sizeof(short); k++) {
+			for (k = 0; k < len / sizeof(short) && k < 0x80; k++) {	// don't want to print too much
+				if (!(k & 0xF)) printf("%6X: ", raddr + 2*k);
+				printf("%4.4X ", buf[k]);
+				if ((k & 0xF) == 0xF) printf("\n");
+			}
+			if (k & 0xF) printf("\n");
+			// reread and print the same block
+			if (vmemap_a64_blkread(A64UNIT, GetBase64() + raddr, (unsigned int *)buf, len)) {
+				free(buf);
+				return -4;
+			}
+			for (k = 0; k < len / sizeof(short) && k < 0x80; k++) {	// don't want to print too much
 				if (!(k & 0xF)) printf("%6X: ", raddr + 2*k);
 				printf("%4.4X ", buf[k]);
 				if ((k & 0xF) == 0xF) printf("\n");
