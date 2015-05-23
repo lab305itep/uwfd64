@@ -52,12 +52,12 @@ struct vme_master {
 } __packed;
 
 struct vme_dma_op {
-        u32 aspace;           /* Address Space */
-        u32 cycle;            /* Cycle properties */
-        u32 dwidth;           /* Data transfer width */
         u64 vme_addr;         /* Starting Address on the VMEbus */
         u64 buf_vaddr;        /* Pointer to userspace memory */
         u32 count;            /* Count of bytes to copy */
+        u32 aspace;           /* Address Space */
+        u32 cycle;            /* Cycle properties */
+        u32 dwidth;           /* Data transfer width */
         u32 write;            /* Write flag */
 } __packed;
 
