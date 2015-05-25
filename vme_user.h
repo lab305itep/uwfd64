@@ -34,6 +34,13 @@
 #define VME_A64_MAX     0x10000000000000000ULL
 #define VME_CRCSR_MAX   0x1000000ULL
 
+#define VME_DMA_VME_TO_MEM              (1<<0)
+#define VME_DMA_MEM_TO_VME              (1<<1)
+#define VME_DMA_VME_TO_VME              (1<<2)
+#define VME_DMA_MEM_TO_MEM              (1<<3)
+#define VME_DMA_PATTERN_TO_VME          (1<<4)
+#define VME_DMA_PATTERN_TO_MEM          (1<<5)
+
 /* From drivers/staging/vme/devices/vme_user.h */
 /* If ioctl's don't work, try checking headers from your kernel. */
 
@@ -58,8 +65,8 @@ struct vme_dma_op {
         u32 aspace;           /* Address Space */
         u32 cycle;            /* Cycle properties */
         u32 dwidth;           /* Data transfer width */
-        u32 write;            /* Write flag */
-} __packed;
+        u32 dir;              /* Transfer Direction */
+};
 
 #define VME_IOC_MAGIC 0xAE
 
