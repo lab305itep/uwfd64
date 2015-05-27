@@ -610,6 +610,7 @@ public:
 	void SoftTrigger(int freq);
 	int TestADCReg(int cnt);
 	int TestFifo(int cnt);
+	int TestRandomRead(int cnt);
 	int TestReg32(int cnt);
 	int TestSDRAM(int cnt);
 	int TestSlaveReg16(int cnt);

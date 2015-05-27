@@ -278,6 +278,11 @@ int uwfd64::ADCAdjust(int adcmask = 0xFFFF)
 	}
 	if (adcmask & 0x10000) printf("\n");
 
+	// Switch ADC to normal mode
+	for (i=0; i<16; i++) {
+		if (!(adcmask & (1 << i))) continue;
+		if (ADCWrite(i, ADC_REG_TEST, 0)) return -3;
+	}
 	return 0;
 }
 
@@ -1137,9 +1142,12 @@ int uwfd64::TestFifo(int cnt)
 		if (len > MBYTE) len = MBYTE;
 		if (raddr + len > fifotop) len = fifotop - raddr;
 		printf("waddr = %X, raddr = %X, len = %X waddr-raddr = %X\n", waddr, raddr, len, waddr - raddr);
-//		if (vmemap_a64_dma(dma_fd, GetBase64() + raddr, (unsigned int *)buf, len, 0)) {
-		if (vmemap_a64_blkread(A64UNIT, GetBase64() + raddr, (unsigned int *)buf, len)) {
+		if (vmemap_a64_dma(dma_fd, GetBase64() + raddr, (unsigned int *)buf, len, 0)) {
+//		if (vmemap_a64_blkread(A64UNIT, GetBase64() + raddr, (unsigned int *)buf, len)) {
 			free(buf);
+a32->fifo.csr = 0x90000000;	// en debug
+printf("dma read error:%m  debug = %8.8X\n", a32->fifo.csr);
+a32->fifo.csr = 0x80000000;	// dis debug
 			return -4;
 		}
 //		printf("\nraddr = 0x%X  len = %d\n", raddr, len);
@@ -1170,7 +1178,7 @@ int uwfd64::TestFifo(int cnt)
 				printf("%4.4X ", buf[k]);
 				if ((k & 0xF) == 0xF) printf("\n");
 			}
-			if (k & 0xF) printf("\n");
+			if (k & 0xF) printf("\n\n");
 			// reread and print the same block
 			if (vmemap_a64_blkread(A64UNIT, GetBase64() + raddr, (unsigned int *)buf, len)) {
 				free(buf);
@@ -1188,6 +1196,47 @@ int uwfd64::TestFifo(int cnt)
 		a32->fifo.rptr = raddr;
 	}
 
+	free(buf);
+	return errcnt;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Write 1 MByte of the SDRAM memory and do random reads
+//	cnt - number of reads
+//	Return number of errors. Negative number is returned on access error.
+int uwfd64::TestRandomRead(int cnt)
+{
+	int irc;
+	int errcnt;
+	int i, m;
+	unsigned int *buf;
+	unsigned int *ptr;
+	unsigned long long vme_addr;
+	
+	buf = (unsigned int *) malloc(MBYTE);
+	if (!buf) return -1;
+	errcnt = 0;	
+	srand48(time(NULL));
+	vme_addr = GetBase64();
+	// Fill
+	for(m = 0; m < MBYTE / sizeof(int); m++) buf[m] = mrand48();
+	irc = vmemap_a64_dma(dma_fd, vme_addr, buf, MBYTE, 1);
+	if (irc) {
+		free(buf);
+		return -2;
+	}
+	// Test
+	ptr = vmemap_open(A64UNIT, vme_addr, MBYTE, VME_A64, VME_USER | VME_DATA, VME_D32);
+	if (!ptr) {
+		free(buf);
+		return -3;
+	}
+	for (m = 0; m < cnt; m++) {
+		i = mrand48() & (MBYTE / sizeof(int) - 1);
+		if (ptr[i] != buf[i]) errcnt++;
+//		if (m <100) printf("%d ==> %d(%X)\n", m, i, buf[i]);
+	}
+	vmemap_close(ptr);
 	free(buf);
 	return errcnt;
 }

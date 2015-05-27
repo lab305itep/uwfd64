@@ -307,6 +307,9 @@ int uwfd64_tool::DoTest(uwfd64 *ptr, int type, int cnt)
 	case 6:
 		irc = ptr->TestFifo(cnt);
 		break;
+	case 7:
+		irc = ptr->TestRandomRead(cnt);
+		break;	
 	default:
 		irc = -10;
 		break;
@@ -694,6 +697,7 @@ void Help(void)
 	printf("\t4 - write/read 8-bit pattern 1 LSB register in ADCs with random numbers;\n");
 	printf("\t5 - configure and read back slave clock controller SiLabs Si5338;\n");
 	printf("\t6 - get blocks to fifo and check format (length and CW).\n");
+	printf("\t7 - Fill the 1st Mbyte with random numbers and do random address reads.\n");
 	printf("U num|* addr [data] - read/write 16-bit word to clock CDCUN1208LP chip using I2C;\n");
 	printf("V num|* [nadc] - scan and adjust input data delays for module num adc nadc or all adc's if omitted\n");
 	printf("X num|* addr [data] - send/receive data from slave Xilinxes via SPI. addr - SPI address.\n");
