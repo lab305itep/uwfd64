@@ -11,6 +11,7 @@
 #include <readline/history.h>
 #include <readline/readline.h>
 #include "libvmemap.h"
+#include "log.h"
 #include "uwfd64.h"
 
 #define WAIT4DONE	1000	// 10 s
@@ -79,6 +80,8 @@ uwfd64_tool::uwfd64_tool(void)
         		config_error_line(pcnf), config_error_text(pcnf));
             	pcnf = NULL;
     	}
+
+	LogInit(pcnf);
 
 	for (i = 0; i < 255 && N < 20; i++) {
 		ptr = new uwfd64(i, N + 2, a16, a32, dma_fd, pcnf);

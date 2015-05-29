@@ -9,6 +9,7 @@
 #include <string.h>
 #include <time.h>
 #include "libvmemap.h"
+#include "log.h"
 #include "uwfd64.h"
 
 //	Constructor - only set addresses here
@@ -1141,7 +1142,7 @@ int uwfd64::TestFifo(int cnt)
 		}
 		if (len > MBYTE) len = MBYTE;
 		if (raddr + len > fifotop) len = fifotop - raddr;
-		printf("waddr = %X, raddr = %X, len = %X waddr-raddr = %X\n", waddr, raddr, len, waddr - raddr);
+//		printf("waddr = %X, raddr = %X, len = %X waddr-raddr = %X\n", waddr, raddr, len, waddr - raddr);
 		if (vmemap_a64_dma(dma_fd, GetBase64() + raddr, (unsigned int *)buf, len, 0)) {
 //		if (vmemap_a64_blkread(A64UNIT, GetBase64() + raddr, (unsigned int *)buf, len)) {
 			free(buf);
@@ -1211,6 +1212,7 @@ int uwfd64::TestRandomRead(int cnt)
 	int i, m;
 	unsigned int *buf;
 	unsigned int *ptr;
+	unsigned int val;
 	unsigned long long vme_addr;
 	
 	buf = (unsigned int *) malloc(MBYTE);
@@ -1233,8 +1235,12 @@ int uwfd64::TestRandomRead(int cnt)
 	}
 	for (m = 0; m < cnt; m++) {
 		i = mrand48() & (MBYTE / sizeof(int) - 1);
-		if (ptr[i] != buf[i]) errcnt++;
-//		if (m <100) printf("%d ==> %d(%X)\n", m, i, buf[i]);
+		val = ptr[i];
+		if (val != buf[i]) {
+			if (errcnt < 100) Log(DEBUG, "%8.8X: %8.8X (write) != %8.8X (read)\n", 
+				i * sizeof(int), buf[i], val);
+			errcnt++;
+		}
 	}
 	vmemap_close(ptr);
 	free(buf);
@@ -1266,15 +1272,18 @@ int uwfd64::TestReg32(int cnt)
 int uwfd64::TestSDRAM(int cnt)
 {
 	int irc;
-	int errcnt;
+	int errcnt, fcnt;
 	int i, j, k, m;
 	int seed;
+	int flag;
 	unsigned int *buf;
+	unsigned int val;
 	unsigned long long vme_addr;
 	
 	buf = (unsigned int *) malloc(MBYTE);
 	if (!buf) return -1;
-	errcnt = 0;	
+	errcnt = 0;
+	fcnt = 0;	
 	for (i = 0; i < cnt; i += j) {	// cycle over passes
 		j = cnt - i;
 		if (j > MEMSIZE/MBYTE) j = MEMSIZE/MBYTE;
@@ -1288,7 +1297,8 @@ int uwfd64::TestSDRAM(int cnt)
 //			printf("Writing: i=%d j=%d k=%d irc=%d\n", i, j, k, irc);
 			if (irc) {
 				free(buf);
-				return -1;
+				Log(ERROR, "VME DMA write error %m\n");
+				return -2;
 			}
 			vme_addr += MBYTE;
 		}
@@ -1297,15 +1307,37 @@ int uwfd64::TestSDRAM(int cnt)
 		vme_addr = GetBase64();
 		for (k = 0; k < j; k++) {
 			irc = vmemap_a64_dma(dma_fd, vme_addr, buf, MBYTE, 0);
+//			irc = vmemap_a64_blkread(A64UNIT, vme_addr, buf, MBYTE);
 //			printf("Reading: i=%d j=%d k=%d irc=%d\n", i, j, k, irc);
 			if (irc) {
 				free(buf);
-				return -1;
+				Log(ERROR, "VME DMA read error %m\n");
+				return -3;
 			}
-			for(m = 0; m < MBYTE / sizeof(int); m++) if (buf[m] != mrand48()) errcnt++;
+			flag = 0;
+			fcnt = errcnt;
+			for(m = 0; m < MBYTE / sizeof(int); m++) {
+				val = mrand48();
+				if (buf[m] != val) {
+					errcnt++;
+					flag = 1;
+					if (errcnt < 100) Log(DEBUG, "%8.8X: %8.8X (write) != %8.8X (read)\n", 
+						k * MBYTE + m * sizeof(int), val, buf[m]);
+				}
+			}
+			if (flag && fcnt < 100) {
+				for(m = 0; m < MBYTE / sizeof(int); m++) {
+					if ((m & 7) == 0) Log(DEBUG, "%8.8X: ", k * MBYTE + m * sizeof(int));
+					Log(DEBUG, "%8.8X ", buf[m]);
+					if ((m & 7) == 7) Log(DEBUG, "\n");
+				}
+				if (m & 7) Log(DEBUG, "\n");
+//				goto fin;
+			}
 			vme_addr += MBYTE;
 		}
 	}
+//fin:
 	free(buf);
 	return errcnt;
 }
