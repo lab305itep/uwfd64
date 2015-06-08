@@ -166,10 +166,15 @@ void uwfd64_tool::A32Write(int addr, int val)
 	}
 }
 
-void uwfd64_tool::A64Dump(long long addr, int len)
+void uwfd64_tool::A64Dump(long long addr, int leng)
 {
-	int i;
+	int i, j;
 	unsigned int *buf;
+	unsigned short *sbuf;
+	int len, blen;
+
+	if (leng < 0) len = -leng; else len = leng;
+
 	if (addr + len > 0x100 * A64STEP) {
 		printf("Address 0x%LX is out of range: 0 - 0x%LX\n", addr + len, 0x100 * A64STEP);
 		return;
@@ -183,12 +188,32 @@ void uwfd64_tool::A64Dump(long long addr, int len)
 		printf("Read error.\n");
 		return;
 	}
-	for (i = 0; i < len; i += 4) {
-		if (!(i & 0x1C)) printf("A64[0xAAAAAA00_00000000 + 0x%LX]: ", addr + i);
-		printf("%8.8X ", buf[i / 4]);
-		if ((i & 0x1C) == 0x1C) printf("\n");
+
+	if (leng >= 0) {
+		for (i = 0; i < len; i += 4) {
+			if (!(i & 0x1C)) printf("A64[0xAAAAAA00_00000000 + 0x%LX]: ", addr + i);
+			printf("%8.8X ", buf[i / 4]);
+			if ((i & 0x1C) == 0x1C) printf("\n");
+		}
+		if (i & 0x1C) printf("\n");
+	} else {
+		// dump as block structure	
+		sbuf = (unsigned short *)buf;
+		for (i = 0; i < len; i += 2) {
+			if (sbuf[i/2] & 0x8000) {
+				blen = sbuf[i/2] & 0x1FF;
+				printf("Block @ 0x%LX: Len = %3.3X ", addr + i, blen);		
+				if (blen) {
+					printf("Chan = %2.2X BlkType = %1X, Token = %3.3X Err = %d Par = %d Data:", (sbuf[i/2] >> 9) & 0x3F, (sbuf[i/2 + 1] >> 12) & 0x7, 
+							sbuf[i/2 + 1] & 0x3FF, (sbuf[i/2 + 1] >> 10) & 0x1, (sbuf[i/2 + 1] >> 11) & 0x1);
+					for (j=2; j<6 && j<blen + 1; j++) printf(" %4.4X", sbuf[i/2 + j]);
+					printf(" ... ");
+					for (j= (blen > 8) ? blen - 3 : 6; j<blen+1; j++) printf(" %4.4X", sbuf[i/2 + j]);
+				} 
+				printf(" Next CW: %s\n", (sbuf[i/2 + blen + 1]) ? "Yes" : "No");
+			}		
+		}
 	}
-	if (i & 0x1C) printf("\n");
 }
 
 void uwfd64_tool::A64Read(long long addr)
