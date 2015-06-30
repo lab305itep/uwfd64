@@ -461,13 +461,65 @@ int uwfd64::ConfigureSlaveClock(int num, const char *fname)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Configure Slave Xilinx with already read configuration
+//	num - Xilinx number (0-3)
+//	Return 0 if OK, or negative on error
+//
+int uwfd64::ConfigureSlaveXilinx(int num)
+{
+	int errcnt;
+	int i;
+	int val;
+
+	errcnt = 0;
+	// coefficiences for trigger production
+	for (i=0; i<16; i++) {
+		val = 0x8000 * Conf.TrigCoef[16*num + i];
+		if(ICXWrite(ICX_SLAVE_STEP * num + ICX_SLAVE_COEF + i, val)) errcnt++;
+	}
+	// main trigger channel mask (1 = disable)
+	if(ICXWrite(ICX_SLAVE_STEP * num + ICX_SLAVE_MTMASK, Conf.MainTrigMask[num])) errcnt++;
+	// self trigger channel mask (1 = disable)
+	if(ICXWrite(ICX_SLAVE_STEP * num + ICX_SLAVE_STMASK, Conf.SelfTrigMask[num])) errcnt++;
+	// summ channel mask (1 = disable)
+	if(ICXWrite(ICX_SLAVE_STEP * num + ICX_SLAVE_SUMASK, Conf.TrigSumMask[num])) errcnt++;
+	// invert channel mask (0 = pulses go up)
+	if(ICXWrite(ICX_SLAVE_STEP * num + ICX_SLAVE_INVMASK, Conf.InvertMask[num])) errcnt++;
+	// master trigger zero suppression threshold
+	if(ICXWrite(ICX_SLAVE_STEP * num + ICX_SLAVE_MTTHR, Conf.ZeroSupThreshold)) errcnt++;
+	// self trigger threshold
+	if(ICXWrite(ICX_SLAVE_STEP * num + ICX_SLAVE_STTHR, Conf.SelfTrigThreshold)) errcnt++;
+	// master trigger sum 64 production threshold
+	if(ICXWrite(ICX_SLAVE_STEP * num + ICX_SLAVE_SUTHR, Conf.MasterTrigThreshold)) errcnt++;
+	// selftrigger prescale
+	if(ICXWrite(ICX_SLAVE_STEP * num + ICX_SLAVE_STPRC, Conf.SelfTriggerPrescale)) errcnt++;
+	// window length for both triggers and trigger history
+	if(ICXWrite(ICX_SLAVE_STEP * num + ICX_SLAVE_WINLEN, Conf.WinLen)) errcnt++;
+	// master trigger window begin
+	if(ICXWrite(ICX_SLAVE_STEP * num + ICX_SLAVE_MTWINBEG, Conf.TrigWinBegin)) errcnt++;
+	// self trigger window begin
+	if(ICXWrite(ICX_SLAVE_STEP * num + ICX_SLAVE_STWINBEG, Conf.SelfWinBegin)) errcnt++;
+	// trigger history window begin
+	if(ICXWrite(ICX_SLAVE_STEP * num + ICX_SLAVE_SUWINBEG, Conf.SumWinBegin)) errcnt++;
+	// delay of local sum for adding to other X's
+	if(ICXWrite(ICX_SLAVE_STEP * num + ICX_SLAVE_SUDELAY, Conf.SumDelay)) errcnt++;
+	// zero suppression window begin (from MTWINBEG)
+	if(ICXWrite(ICX_SLAVE_STEP * num + ICX_SLAVE_MTZBEG, Conf.ZSWinBegin)) errcnt++;
+	// zero suppression window end (from MTWINBEG)	if(ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_MTMASK, Conf.MainTrigMask[i])) errcnt++;
+	if(ICXWrite(ICX_SLAVE_STEP * num + ICX_SLAVE_MTZEND, Conf.ZSWinEnd)) errcnt++;
+	// CSR
+	if(ICXWrite(ICX_SLAVE_STEP * num + ICX_SLAVE_CSR_OUT, (Conf.TrigHistMask & (1 << num)) ? SLAVE_CSR_HISTENABLE : 0)) errcnt++;
+	return errcnt;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //	Write common offset DAC via SPI. No way to read.
 //	Return 0 if OK, -10 on timeout
 int uwfd64::DACSet(int val)
 {
 	int i;
 	a32->dac.csr = SPI_CSR_CS;		// crystall select
-	a32->dac.dat = (val >> 8) & 0xFF;	// High byte
+	a32->dac.dat = (val >> 8) & 0x3F;	// High byte
     	for (i = 0; i < SPI_TIMEOUT; i++) if (!(a32->dac.csr & SPI_CSR_BUSY)) break;
 	if (i == SPI_TIMEOUT) goto fin;
 	a32->dac.dat = val & 0xFF;		// Low byte
@@ -718,6 +770,7 @@ int uwfd64::Init(void)
 	for (i=0; i<16; i++) if(ADCWrite(i, ADC_REG_OUTPUT, 0)) errcnt++;
 	// ADC input adjust
 	if (ADCAdjust()) errcnt++;
+	for (i=0; i<4; i++) errcnt += ConfigureSlaveXilinx(i);
 	return errcnt;
 }
 
@@ -948,7 +1001,8 @@ void uwfd64::ReadConfig(config_t *cnf)
     	char *stmp;
     	char str[1024];
 	char sect[16];
-	int i;
+	int i, j;
+	config_setting_t *ptr;
 	
 	for (i=0; i<2; i++) {
 		if (i) {
@@ -986,10 +1040,6 @@ void uwfd64::ReadConfig(config_t *cnf)
 			tmp %= 3;
 			Conf.MasterClockErc = tmp;
 		}
-//	char SlaveClockFile[MAX_PATH_LEN];	// Si5338 .h configuration file
-		sprintf(str, "%s.SlaveClockFile", sect);
-		if (config_lookup_string(cnf, str, (const char **) &stmp)) 
-			strncpy(Conf.SlaveClockFile, stmp, MAX_PATH_LEN);
 //	int DAC;		// DAC setting
 		sprintf(str, "%s.DAC", sect);
 		if (config_lookup_int(cnf, str, &tmp)) {
@@ -1034,6 +1084,102 @@ void uwfd64::ReadConfig(config_t *cnf)
 			tmp &= 0x3F;
 			Conf.IODelay = tmp;
 		}
+//	char SlaveClockFile[MAX_PATH_LEN];	// Si5338 .h configuration file
+		sprintf(str, "%s.SlaveClockFile", sect);
+		if (config_lookup_string(cnf, str, (const char **) &stmp)) 
+			strncpy(Conf.SlaveClockFile, stmp, MAX_PATH_LEN);
+//	int TrigHistMask;	// Mask for slave Xilinxes history block
+		sprintf(str, "%s.TrigHistMask", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp &= 0xF;
+			Conf.TrigHistMask = tmp;
+		}
+//	int ZeroSupThreshold;	// Threshold for zero suppression in master trigger
+		sprintf(str, "%s.ZeroSupThreshold", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp &= 0xFFF;
+			Conf.ZeroSupThreshold = tmp;
+		}
+//	int SelfTrigThreshold;	// Threshold for self trigger
+		sprintf(str, "%s.SelfTrigThreshold", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp &= 0xFFF;
+			Conf.SelfTrigThreshold = tmp;
+		}
+//	int MasterTrigThreshold;	// Threshold for master trigger production
+		sprintf(str, "%s.MasterTrigThreshold", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp &= 0xFFFF;
+			Conf.MasterTrigThreshold = tmp;
+		}
+//	int SelfTriggerPrescale;	// Self trigger prescale
+		sprintf(str, "%s.SelfTriggerPrescale", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp &= 0xFFFF;
+			Conf.SelfTriggerPrescale = tmp;
+		}
+//	int WinLen;		// Waveform window length
+		sprintf(str, "%s.WinLen", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp &= 0x1FF;
+			Conf.WinLen = tmp;
+		}
+//	int TrigWinBegin;	// Master trigger window begin delay
+		sprintf(str, "%s.TrigWinBegin", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp &= 0x3FF;
+			Conf.TrigWinBegin = tmp;
+		}
+//	int SelfWinBegin;	// Self trigger window begin delay
+		sprintf(str, "%s.SelfWinBegin", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp &= 0x3FF;
+			Conf.SelfWinBegin = tmp;
+		}
+//	int SumWinBegin;	// Trigger sum window begin delay
+		sprintf(str, "%s.SumWinBegin", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp &= 0x3FF;
+			Conf.SumWinBegin = tmp;
+		}
+//	int SumDelay;		// Delay local channels for global sum
+		sprintf(str, "%s.SumDelay", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp &= 0x1F;
+			Conf.SumDelay = tmp;
+		}
+//	int ZSWinBegin;		// Zero suppression window begin (from TrigWinBegin)		
+		sprintf(str, "%s.ZSWinBegin", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp &= 0x1FF;
+			Conf.ZSWinBegin = tmp;
+		}
+//	int ZSWinEnd;		// Zero suppression window end (from TrigWinBegin)
+		sprintf(str, "%s.ZSWinEnd", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp &= 0x1FF;
+			Conf.ZSWinEnd = tmp;
+		}
+//	float TrigCoef[64];	// Coefficients for trigger production
+		sprintf(str, "%s.TrigCoef", sect);
+		ptr = config_lookup(cnf, str);
+		if (ptr) for (j=0; j<64; j++) Conf.TrigCoef[j] = config_setting_get_float_elem(ptr, j);
+//	short int MainTrigMask[4];	// Mask channels from master trigger
+		sprintf(str, "%s.MainTrigMask", sect);
+		ptr = config_lookup(cnf, str);
+		if (ptr) for (j=0; j<4; j++) Conf.MainTrigMask[j] = config_setting_get_int_elem(ptr, j);
+//	short int SelfTrigMask[4];	// Mask channels from self trigger
+		sprintf(str, "%s.SelfTrigMask", sect);
+		ptr = config_lookup(cnf, str);
+		if (ptr) for (j=0; j<4; j++) Conf.SelfTrigMask[j] = config_setting_get_int_elem(ptr, j);
+//	short int TrigSumMask[4];	// Mask channels from trigger production sum
+		sprintf(str, "%s.TrigSumMask", sect);
+		ptr = config_lookup(cnf, str);
+		if (ptr) for (j=0; j<4; j++) Conf.TrigSumMask[j] = config_setting_get_int_elem(ptr, j);
+//	short int InvertMask[4];	// Mask channels for invertion
+		sprintf(str, "%s.InvertMask", sect);
+		ptr = config_lookup(cnf, str);
+		if (ptr) for (j=0; j<4; j++) Conf.InvertMask[j] = config_setting_get_int_elem(ptr, j);
 	}
 }
 

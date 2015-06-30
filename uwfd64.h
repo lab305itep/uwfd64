@@ -349,13 +349,35 @@ struct uwfd64_a32_reg {
 #define ICX_SLAVE_CSR_OUT	1
 #define ICX_SLAVE_VER_IN	2
 #define ICX_SLAVE_VER_OUT	3
-#define ICX_SLAVE_SPI_DAT	4
-#define ICX_SLAVE_SPI_CSR	5
+#define ICX_SLAVE_ERR1		4
+#define ICX_SLAVE_ERR2		5
+#define ICX_SLAVE_SPI_DAT	6
+#define ICX_SLAVE_SPI_CSR	7
 #define ICX_SLAVE_I2C_PRCL	8
 #define ICX_SLAVE_I2C_PRCH	9
 #define ICX_SLAVE_I2C_CTR	10
 #define ICX_SLAVE_I2C_DAT	11
 #define ICX_SLAVE_I2C_CSR	12
+
+#define ICX_SLAVE_COEF		16	// coefficiences for trigger production
+
+#define ICX_SLAVE_MTMASK	32	// main trigger channel mask (1 = disable)
+#define ICX_SLAVE_STMASK	33	// self trigger channel mask (1 = disable)
+#define ICX_SLAVE_SUMASK	34	// summ channel mask (1 = disable)
+#define ICX_SLAVE_INVMASK	35	// invert channel mask (0 = pulses go up)
+#define ICX_SLAVE_MTTHR		36	// master trigger zero suppression threshold
+#define ICX_SLAVE_STTHR		37	// self trigger threshold
+#define ICX_SLAVE_SUTHR		38	// master trigger sum 64 production threshold
+#define ICX_SLAVE_STPRC		39      // selftrigger prescale
+#define ICX_SLAVE_WINLEN	40      // window length for both triggers and trigger history
+#define ICX_SLAVE_MTWINBEG      41      // master trigger window begin
+#define ICX_SLAVE_STWINBEG      42      // self trigger window begin
+#define ICX_SLAVE_SUWINBEG      43      // trigger history window begin
+#define ICX_SLAVE_SUDELAY       44      // delay of local sum for adding to other X's
+#define ICX_SLAVE_MTZBEG	45	// zero suppression window begin (from MTWINBEG)
+#define ICX_SLAVE_MTZEND	46	// zero suppression window end (from MTWINBEG)
+
+#define ICX_SLAVE_PED		48	// pedestals
 
 #define ICX_SLAVE_ADC		64	// start of ADC recievers reg array
 #define ICX_SLAVE_ADC_STEP	16	// shift to the next ADC in this array
@@ -368,7 +390,13 @@ struct uwfd64_a32_reg {
 #define SLAVE_CSR_TMODE		1
 #define SLAVE_CSR_TLEN		0x10
 #define SLAVE_CSR_TSTART	0x80
+#define SLAVE_CSR_HISTENABLE	0x4000
 #define SLAVE_CSR_RAW		0x8000
+
+
+#define ICX_ERR2_HISTMISS	1
+#define ICX_ERR2_ARBOVR		0x4000
+#define ICX_ERR2_ARBUNDR	0x8000
 
 #define SLAVE_ADCCSR_DMASK	0x1FF	// bit mask for IODELAY increments
 #define SLAVE_ADCCSR_DINC	0x200	// IODELAY increment command
@@ -550,7 +578,6 @@ struct uwfd64_module_config {
 	int MasterInhMux;	// master inhibit multiplexer setting
 	int MasterClockDiv;	// Mater clock divider (0 - 1, 1 - 2, 2 - 4, 3 - 8)
 	int MasterClockErc;	// Mater clock edge control (0 - fast, 1 - medium, 2 - slow)
-	char SlaveClockFile[MAX_PATH_LEN];	// Si5338 .h configuration file
 	int DAC;		// DAC setting
 	int TrigGenMask;	// Mask of slave xilinxes participating in trigger generation
 	int TrigOrTime;		// Number of clocks to OR trigger sources
@@ -559,6 +586,24 @@ struct uwfd64_module_config {
 	int FifoBegin;		// Main FIFO start address in 8k blocks
 	int FifoEnd;		// Main FIFO end address in 8k blocks
 	int IODelay;		// ADC data delay in calibrated delay taps
+	int TrigHistMask;	// Mask for slave Xilinxes history block
+	int ZeroSupThreshold;	// Threshold for zero suppression in master trigger
+	int SelfTrigThreshold;	// Threshold for self trigger
+	int MasterTrigThreshold;	// Threshold for master trigger production
+	int SelfTriggerPrescale;	// Self trigger prescale
+	int WinLen;		// Waveform window length
+	int TrigWinBegin;	// Master trigger window begin delay
+	int SelfWinBegin;	// Self trigger window begin delay
+	int SumWinBegin;	// Trigger sum window begin delay
+	int SumDelay;		// Delay local channels for global sum
+	int ZSWinBegin;		// Zero suppression window begin (from TrigWinBegin)		
+	int ZSWinEnd;		// Zero suppression window end (from TrigWinBegin)
+	float TrigCoef[64];	// Coefficients for trigger production
+	short int MainTrigMask[4];	// Mask channels from master trigger
+	short int SelfTrigMask[4];	// Mask channels from self trigger
+	short int TrigSumMask[4];	// Mask channels from trigger production sum
+	short int InvertMask[4];	// Mask channels for invertion
+	char SlaveClockFile[MAX_PATH_LEN];	// Si5338 .h configuration file
 };
 
 //************************************************************************************************************************************************************************//
@@ -580,6 +625,7 @@ public:
 	int ADCAdjust(int adcmask);
 	int ConfigureMasterClock(int sel, int div, int erc = 0);
 	int ConfigureSlaveClock(int num, const char *fname);
+	int ConfigureSlaveXilinx(int num);
 	void EnableFifo(int what);
 	int DACSet(int val);
 	int GetADCID(int num);
