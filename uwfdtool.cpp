@@ -338,6 +338,9 @@ int uwfd64_tool::DoTest(uwfd64 *ptr, int type, int cnt)
 	case 7:
 		irc = ptr->TestRandomRead(cnt);
 		break;	
+	case 8:
+		irc = ptr->TestAllChannels(cnt);
+		break;	
 	default:
 		irc = -10;
 		break;

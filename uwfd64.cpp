@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <math.h>
 #include "libvmemap.h"
 #include "log.h"
 #include "uwfd64.h"
@@ -1236,6 +1237,239 @@ int uwfd64::TestADCReg(int cnt)
 	}
 	return errcnt;
 }
+
+void lslope(short * y, int len, double * slope, double * chi2) {
+	double s=0;
+	double sx=0;
+	double sx2=0;
+	double sy=0;
+	double sxy=0;
+	double a, b;
+	int i;
+
+	if (!len) {
+		*slope = 0;
+		*chi2 = 0;
+		return;
+	}
+	for  (i=0; i<len; i++) {
+		sx += (double)i;
+		sx2 += (double)i * (double)i;
+		sy += (double)y[i];
+		sxy += (double)i * (double)y[i];
+	}
+	b = ((double)len * sxy - sx * sy)/((double)len * sx2 - sx * sx);
+	a = (sy - b * sx)/(double)len;
+		
+	for  (i=0; i<len; i++) {
+		s += (a + b * (double)i - (double)y[i]) * (a + b * (double)i - (double)y[i]);
+	}
+	*slope = b;
+	*chi2 = s / (double)len;
+	return;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Test All channels by applying fastest possible pedestal change
+//	cnt - repeat counter, number of pedestal change pulses
+//	positive cnt means use of master trigger, self triggers are not blocked
+//	negative cnt means use of self trigger, master trigger is blocked by insensitivity in trigger register
+//	Return number of errors
+//	Will try to keep as much as possible from the initial config
+int uwfd64::TestAllChannels(int cnt)
+{
+
+#define KNRM  "\x1B[0m"
+#define KRED  "\x1B[31m"
+#define KGRN  "\x1B[32m"
+#define KYEL  "\x1B[33m"
+#define KBLU  "\x1B[34m"
+#define KMAG  "\x1B[35m"
+#define KCYN  "\x1B[36m"
+#define KWHT  "\x1B[37m"
+
+	const int PED_HIGH = 0x200;		// highest pedestal setting to comply with linearity	
+	const int PED_LOW = 0x4000-PED_HIGH;	// lowest pedestal setting to comply with linearity	
+	const int PED_MID = 0x2000;		// middle DAC setting
+	const int maxpeddev = 20;		// maximum allowed pedestal deviation from mid val
+	const double fullscalenorm = 0.608;	// average full scale
+	const double fullscaledev = 0.010;	// maximum allowed deviation from full scale
+	const int maxnonlin = 3;		// maximum difference between halfscales
+	int i, j;
+	int peds[3][64]; 
+	double tmp;
+	int token, rep, fifobot, errflag, errcnt, len, rlen, chn, blktype;
+	short *buf;
+	double slope[68], chi2[68];
+
+	if (cnt > 0) rep = cnt; else rep = -cnt;
+	buf = (short *) malloc(MBYTE);
+	if (!buf) return -1;
+
+	// always switch to internal trigger and internal inhibit, naturally internal clocks
+	a32->csr.out = 0; 
+	// set inhibit
+	Inhibit(1);
+
+	// check pedestals at min, mid, max
+	
+	// switch pedestal calculators to freely follow the level
+	for (i=0; i<4; i++) ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_CSR_OUT, 0);
+	// set lowest possible pedestal
+	DACSet(PED_LOW);
+	// 80 usec to settle + 2*32 usec to recalculate
+	vmemap_usleep(2000);
+	for (i=0; i<64; i++) peds[0][i] = ICXRead(ICX_SLAVE_STEP * (i/16) + ICX_SLAVE_PED + (i%16));
+	// set middle pedestal
+	DACSet(PED_MID);
+	// 80 usec to settle + 2*32 usec to recalculate
+	vmemap_usleep(2000);
+	for (i=0; i<64; i++) peds[1][i] = ICXRead(ICX_SLAVE_STEP * (i/16) + ICX_SLAVE_PED + (i%16));
+	// set highest possible pedestal
+	DACSet(PED_HIGH);
+	// 80 usec to settle + 2*32 usec to recalculate
+	vmemap_usleep(2000);
+	for (i=0; i<64; i++) peds[2][i] = ICXRead(ICX_SLAVE_STEP * (i/16) + ICX_SLAVE_PED + (i%16));
+
+	printf("                ");
+	for (i=0; i<32; i++) printf("%6d", i);
+	printf("\n");	
+	// print pedestal deviations
+	for (i=0, tmp=0; i<64; i++) tmp += (peds[1][i] - 0x800); 
+	printf("Pedestal deviations from middle value (<%d), average = %4.1f\n", maxpeddev, tmp/64.);
+	for  (i=0; i<64; i++) {
+		if (i%32 == 0) printf("Channels %2d-%2d: ", i, i+31);
+		printf("%s%6d%s", (abs(peds[1][i] - 0x800) > maxpeddev) ? KRED : KNRM, peds[1][i] - 0x800, KNRM);
+		if (i%32 == 31) printf("\n");
+	}
+	// full scale
+	for (i=0, tmp=0; i<64; i++) tmp += (double)(peds[2][i] - peds[0][i])/(double)(PED_LOW-PED_HIGH)*4.; 
+	printf("Full scale (ADChigh-ADClow)/(PEDHigh-PEDlow) (within %6.3f from %6.3f), average = %6.3f\n", fullscaledev, fullscalenorm, tmp/64.);
+	for  (i=0; i<64; i++) {
+		if (i%32 == 0) printf("Channels %2d-%2d: ", i, i+31);
+		tmp = (double)(peds[2][i] - peds[0][i])/(double)(PED_LOW-PED_HIGH)*4.;
+		printf("%s%6.3f%s", (fabs(tmp - fullscalenorm) > fullscaledev) ? KRED : KNRM, tmp, KNRM);
+		if (i%32 == 31) printf("\n");
+	}
+	// nonlinearity
+	printf("Nonlinearity (ADChigh-ADCmid)-(ADCmid-ADClow) (<%d)\n", maxnonlin);
+	for  (i=0; i<64; i++) {
+		if (i%32 == 0) printf("Channels %2d-%2d: ", i, i+31);
+		printf("%s%6d%s", (abs(peds[2][i] + peds[0][i] - 2*peds[1][i]) > maxnonlin) ? KRED : KNRM, peds[2][i] + peds[0][i] - 2*peds[1][i], KNRM);
+		if (i%32 == 31) printf("\n");
+	}
+
+	// set middle pedestal
+	DACSet(PED_MID);
+	vmemap_usleep(2000);
+	// fix pedestals and enable trigger history in all 4 X's
+	for (i=0; i<4; i++) ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_CSR_OUT, SLAVE_CSR_PEDINHIBIT | SLAVE_CSR_HISTENABLE);
+	// memorise last token
+	token = a32->csr.in;
+	// Allow master trigger from all 4 X's if cnt > 0 (selftriggers otherwise), remove INH
+	a32->trig.csr = (cnt > 0) ? TRIG_CSR_CHAN_MASK : 0;
+	// clear memory and define beginning of the data
+	a32->fifo.csr &= ~FIFO_CSR_ENABLE;
+	fifobot = (a32->fifo.win & 0xFFFF) << 13;
+
+	errcnt = 0;
+	memset(slope, 0, sizeof(slope));
+	memset(chi2, 0, sizeof(chi2));
+	for (i=0; i<rep; i++) {
+		// allow mwmory to get data (we always start from bot)
+		a32->fifo.csr |= FIFO_CSR_ENABLE;
+		DACSet(PED_HIGH);
+		vmemap_usleep(100);
+		// make reverse pulse to cross zero fast		
+		DACSet(PED_LOW);
+		if ((j=a32->fifo.csr) & FIFO_CSR_ERROR) {
+			printf("error in fifoCSR: %8.8X\n", j);
+			free(buf);
+			return -2;
+		}
+		len = a32->fifo.wptr - fifobot;		// we never wrap
+printf("len = %8.8X\n",len);
+		if (len > MBYTE) len = MBYTE;
+		// read data		
+		if (vmemap_a64_dma(dma_fd, GetBase64() + fifobot, (unsigned int *)buf, len, 0)) {
+			free(buf);
+			return -4;
+		}
+		// clear memory		
+		a32->fifo.csr &= ~FIFO_CSR_ENABLE;
+		// slowly settle normal ped
+		DACSet(PED_MID+40);
+		vmemap_usleep(100);
+		DACSet(PED_MID+20);
+		vmemap_usleep(50);
+		DACSet(PED_MID+10);
+		vmemap_usleep(20);
+		DACSet(PED_MID+5);
+		DACSet(PED_MID+2);
+		vmemap_usleep(1000);
+
+		// analyse
+		errflag = 0;
+		for (j=0; j<len/sizeof(short); ) {
+			// control word
+			if (buf[j] & 0x8000) {
+				rlen = buf[j] & 0x1FF;
+				if (rlen == 0) {	// this is alignment
+					j++;
+					continue;
+				}
+				chn = (buf[j] >> 9) & 0x3F;
+				blktype = (buf[j+1] >> 12) & 7;
+				if (cnt < 0) {		// only selftriggers
+					if (blktype != 0) {
+						printf("Wrong blktype=%d encountered for selftrigger test, channel %2.2X\n", blktype, chn);
+						errflag++;
+					} else {	// selftrigger block
+						lslope(&buf[j+3], rlen-2, &slope[chn], &chi2[chn]);
+					}
+				} else {		// master trigger, trigger block or history block
+					switch (blktype) {
+					case 2:		// trigger block
+						break;
+					case 4:		// history block
+						lslope(&buf[j+3], rlen-2, &slope[64 + (chn >> 4)], &chi2[64 + (chn >> 4)]);
+						break;
+					case 1:		// channel master trigger
+						lslope(&buf[j+3], rlen-2, &slope[chn], &chi2[chn]);
+						break;
+					default:		// wrong type
+						printf("Wrong blktype=%d encountered for master trigger test, channel %2.2X\n", blktype, chn);
+						errflag++;
+						break;
+					}
+				}
+				
+				j += rlen + 1;
+			} else {
+				j++;
+				errflag++;
+			}
+		}
+
+		if (errflag) errcnt++;
+	}
+	printf("Signal slope, ADCu/clk\n");
+	for  (i=0; i<64; i++) {
+		if (i%32 == 0) printf("Channels %2d-%2d: ", i, i+31);
+		printf("%s%6.3f%s", (0) ? KRED : KNRM, slope[i], KNRM);
+		if (i%32 == 31) printf("\n");
+	}
+	printf("Signal chi2, ADCu**2/n\n");
+	for  (i=0; i<64; i++) {
+		if (i%32 == 0) printf("Channels %2d-%2d: ", i, i+31);
+		printf("%s%6.3f%s", (0) ? KRED : KNRM, chi2[i], KNRM);
+		if (i%32 == 31) printf("\n");
+	}
+	return errcnt;
+
+}
+
+
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //	Get data via FIFO. Check block format

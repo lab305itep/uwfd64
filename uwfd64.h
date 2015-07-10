@@ -183,6 +183,7 @@ struct uwfd64_spi_reg {
 #define SPI_TIMEOUT	100
 #define SPI_ADDR_DIR	0x8000
 
+
 // #define I2C_MASTER_SLAVE_PRERlo 0x0     // Clock prescaler register
 // #define I2C_MASTER_SLAVE_PRERhi 0x1     // Clock prescaler register
 // #define I2C_MASTER_SLAVE_CTR    0x2     // Control register
@@ -390,6 +391,8 @@ struct uwfd64_a32_reg {
 #define SLAVE_CSR_TMODE		1
 #define SLAVE_CSR_TLEN		0x10
 #define SLAVE_CSR_TSTART	0x80
+#define SLAVE_CSR_PEDMODE	0x1000
+#define SLAVE_CSR_PEDINHIBIT	0x2000
 #define SLAVE_CSR_HISTENABLE	0x4000
 #define SLAVE_CSR_RAW		0x8000
 
@@ -655,6 +658,7 @@ public:
 	void Reset(void);
 	void ResetFifo(int mask = FIFO_CSR_HRESET | FIFO_CSR_SRESET);
 	void SoftTrigger(int freq);
+	int TestAllChannels(int cnt);
 	int TestADCReg(int cnt);
 	int TestFifo(int cnt);
 	int TestRandomRead(int cnt);
