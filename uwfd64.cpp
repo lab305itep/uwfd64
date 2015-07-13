@@ -1271,11 +1271,13 @@ void lslope(short * y, int len, double * slope, double * chi2) {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //	Test All channels by applying fastest possible pedestal change
-//	cnt - repeat counter, number of pedestal change pulses
+//	cnt - repeat counter, only sign matters, repetition count is alwys 1
 //	positive cnt means use of master trigger, self triggers are not blocked
 //	negative cnt means use of self trigger, master trigger is blocked by insensitivity in trigger register
 //	Return number of errors
-//	Will try to keep as much as possible from the initial config
+//
+//	!!! to be used with t8.conf
+//	
 int uwfd64::TestAllChannels(int cnt)
 {
 
@@ -1295,10 +1297,11 @@ int uwfd64::TestAllChannels(int cnt)
 	const double fullscalenorm = 0.608;	// average full scale
 	const double fullscaledev = 0.010;	// maximum allowed deviation from full scale
 	const int maxnonlin = 3;		// maximum difference between halfscales
+	const double maxnoise = 0.3;		// maximum averaged square of noise
 	int i, j;
 	int peds[3][64]; 
 	double tmp;
-	int token, rep, fifobot, errflag, errcnt, len, rlen, chn, blktype;
+	int token, rep, fifobot, errcnt, len, rlen, chn, blktype;
 	short *buf;
 	double slope[68], chi2[68];
 
@@ -1306,8 +1309,6 @@ int uwfd64::TestAllChannels(int cnt)
 	buf = (short *) malloc(MBYTE);
 	if (!buf) return -1;
 
-	// always switch to internal trigger and internal inhibit, naturally internal clocks
-	a32->csr.out = 0; 
 	// set inhibit
 	Inhibit(1);
 
@@ -1361,110 +1362,188 @@ int uwfd64::TestAllChannels(int cnt)
 
 	// set middle pedestal
 	DACSet(PED_MID);
-	vmemap_usleep(2000);
+	vmemap_usleep(20000);
+
+	// check noise with soft trigger
+	errcnt = 0;
 	// fix pedestals and enable trigger history in all 4 X's
 	for (i=0; i<4; i++) ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_CSR_OUT, SLAVE_CSR_PEDINHIBIT | SLAVE_CSR_HISTENABLE);
+	// clear memory and define beginning of the data
+	a32->fifo.csr &= ~FIFO_CSR_ENABLE;
+	fifobot = (a32->fifo.win & 0xFFFF) << 13;
+	memset(slope, 0, sizeof(slope));
+	memset(chi2, 0, sizeof(chi2));
+	// allow mwmory to get data (we always start from bot)
+	a32->fifo.csr |= FIFO_CSR_ENABLE;
+	SoftTrigger(-1);
+	vmemap_usleep(50000);
+	// check errors
+	if ((j=a32->fifo.csr) & FIFO_CSR_ERROR) {
+		printf("error in fifoCSR: %8.8X\n", j);
+		free(buf);
+		return -2;
+	}
+	len = a32->fifo.wptr - fifobot;		// we never wrap
+printf("len = %8.8X\n",len);
+	if (len > MBYTE) len = MBYTE;
+	// read data		
+	if (vmemap_a64_dma(dma_fd, GetBase64() + fifobot, (unsigned int *)buf, len, 0)) {
+		free(buf);
+		return -4;
+	}
+	// clear memory		
+	a32->fifo.csr &= ~FIFO_CSR_ENABLE;
+	// analyse
+	for (j=0; j<len/sizeof(short); ) {
+		// control word
+		if (buf[j] & 0x8000) {
+			rlen = buf[j] & 0x1FF;
+			if (rlen == 0) {	// this is alignment
+				j++;
+				continue;
+			}
+			chn = (buf[j] >> 9) & 0x3F;
+			blktype = (buf[j+1] >> 12) & 7;
+			// master trigger, trigger block or history block
+			switch (blktype) {
+			case 2:		// trigger block
+				break;
+			case 4:		// history block
+				// extend sign in data
+				for (i=0; i<rlen-2; i++) if (buf[j+i+3] & 0x4000) buf[j+i+3] |= 0x8000;
+				lslope(&buf[j+3], rlen-2, &slope[64 + (chn >> 4)], &chi2[64 + (chn >> 4)]);
+				break;
+			case 1:		// channel master trigger
+				// extend sign in data
+				for (i=0; i<rlen-2; i++) if (buf[j+i+3] & 0x4000) buf[j+i+3] |= 0x8000;
+				lslope(&buf[j+3], rlen-2, &slope[chn], &chi2[chn]);
+				break;
+			default:		// wrong type
+				printf("Wrong blktype=%d encountered for master trigger test, channel %2.2X\n", blktype, chn);
+				errcnt++;
+				break;
+			}
+			j += rlen + 1;
+		} else {
+			j++;
+			errcnt++;
+		}
+	}
+	printf("Noise (<%4.2f)\n", maxnoise);
+	for  (i=0; i<64; i++) {
+		if (i%32 == 0) printf("Channels %2d-%2d: ", i, i+31);
+		printf("%s%6.3f%s", (chi2[i] > maxnoise) ? KRED : KNRM, chi2[i], KNRM);
+		if (i%32 == 31) printf("\n");
+	}
+	printf("History   0-3 : ");
+	for  (i=0; i<4; i++) {
+		printf("%s%6.3f%s", (0) ? KRED : KNRM, chi2[64+i], KNRM);
+	}
+	printf("\n");
+
+return errcnt;
+
+
 	// memorise last token
 	token = a32->csr.in;
 	// Allow master trigger from all 4 X's if cnt > 0 (selftriggers otherwise), remove INH
 	a32->trig.csr = (cnt > 0) ? TRIG_CSR_CHAN_MASK : 0;
 	// clear memory and define beginning of the data
 	a32->fifo.csr &= ~FIFO_CSR_ENABLE;
-	fifobot = (a32->fifo.win & 0xFFFF) << 13;
 
-	errcnt = 0;
 	memset(slope, 0, sizeof(slope));
 	memset(chi2, 0, sizeof(chi2));
-	for (i=0; i<rep; i++) {
-		// allow mwmory to get data (we always start from bot)
-		a32->fifo.csr |= FIFO_CSR_ENABLE;
-		DACSet(PED_HIGH);
-		vmemap_usleep(100);
-		// make reverse pulse to cross zero fast		
-		DACSet(PED_LOW);
-		if ((j=a32->fifo.csr) & FIFO_CSR_ERROR) {
-			printf("error in fifoCSR: %8.8X\n", j);
-			free(buf);
-			return -2;
-		}
-		len = a32->fifo.wptr - fifobot;		// we never wrap
-printf("len = %8.8X\n",len);
-		if (len > MBYTE) len = MBYTE;
-		// read data		
-		if (vmemap_a64_dma(dma_fd, GetBase64() + fifobot, (unsigned int *)buf, len, 0)) {
-			free(buf);
-			return -4;
-		}
-		// clear memory		
-		a32->fifo.csr &= ~FIFO_CSR_ENABLE;
-		// slowly settle normal ped
-		DACSet(PED_MID+40);
-		vmemap_usleep(100);
-		DACSet(PED_MID+20);
-		vmemap_usleep(50);
-		DACSet(PED_MID+10);
-		vmemap_usleep(20);
-		DACSet(PED_MID+5);
-		DACSet(PED_MID+2);
-		vmemap_usleep(1000);
-
-		// analyse
-		errflag = 0;
-		for (j=0; j<len/sizeof(short); ) {
-			// control word
-			if (buf[j] & 0x8000) {
-				rlen = buf[j] & 0x1FF;
-				if (rlen == 0) {	// this is alignment
-					j++;
-					continue;
-				}
-				chn = (buf[j] >> 9) & 0x3F;
-				blktype = (buf[j+1] >> 12) & 7;
-				if (cnt < 0) {		// only selftriggers
-					if (blktype != 0) {
-						printf("Wrong blktype=%d encountered for selftrigger test, channel %2.2X\n", blktype, chn);
-						errflag++;
-					} else {	// selftrigger block
-						lslope(&buf[j+3], rlen-2, &slope[chn], &chi2[chn]);
-					}
-				} else {		// master trigger, trigger block or history block
-					switch (blktype) {
-					case 2:		// trigger block
-						break;
-					case 4:		// history block
-						lslope(&buf[j+3], rlen-2, &slope[64 + (chn >> 4)], &chi2[64 + (chn >> 4)]);
-						break;
-					case 1:		// channel master trigger
-						lslope(&buf[j+3], rlen-2, &slope[chn], &chi2[chn]);
-						break;
-					default:		// wrong type
-						printf("Wrong blktype=%d encountered for master trigger test, channel %2.2X\n", blktype, chn);
-						errflag++;
-						break;
-					}
-				}
-				
-				j += rlen + 1;
-			} else {
-				j++;
-				errflag++;
-			}
-		}
-
-		if (errflag) errcnt++;
+	// allow mwmory to get data (we always start from bot)
+	a32->fifo.csr |= FIFO_CSR_ENABLE;
+	DACSet(PED_HIGH);
+	vmemap_usleep(100);
+	// make reverse pulse to cross zero fast		
+	DACSet(PED_LOW);
+	// check errors
+	if ((j=a32->fifo.csr) & FIFO_CSR_ERROR) {
+		printf("error in fifoCSR: %8.8X\n", j);
+		free(buf);
+		return -2;
 	}
+	len = a32->fifo.wptr - fifobot;		// we never wrap
+printf("len = %8.8X\n",len);
+	if (len > MBYTE) len = MBYTE;
+	// read data		
+	if (vmemap_a64_dma(dma_fd, GetBase64() + fifobot, (unsigned int *)buf, len, 0)) {
+		free(buf);
+		return -4;
+	}
+	// clear memory		
+	a32->fifo.csr &= ~FIFO_CSR_ENABLE;
+	// slowly settle normal ped
+	DACSet(PED_MID+40);
+	vmemap_usleep(100);
+	DACSet(PED_MID+20);
+	vmemap_usleep(50);
+	DACSet(PED_MID+10);
+	vmemap_usleep(20);
+	DACSet(PED_MID+5);
+	DACSet(PED_MID+2);
+	vmemap_usleep(1000);
+
+	// analyse
+	for (j=0; j<len/sizeof(short); ) {
+		// control word
+		if (buf[j] & 0x8000) {
+			rlen = buf[j] & 0x1FF;
+			if (rlen == 0) {	// this is alignment
+				j++;
+				continue;
+			}
+			chn = (buf[j] >> 9) & 0x3F;
+			blktype = (buf[j+1] >> 12) & 7;
+			if (cnt < 0) {		// only selftriggers
+				if (blktype != 0) {
+					printf("Wrong blktype=%d encountered for selftrigger test, channel %2.2X\n", blktype, chn);
+					errcnt++;
+				} else {	// selftrigger block
+					// extend sign in data
+					for (i=0; i<rlen-2; i++) if (buf[j+i+3] & 0x4000) buf[j+i+3] |= 0x8000;
+					lslope(&buf[j+3], rlen-2, &slope[chn], &chi2[chn]);
+				}
+			} else {		// master trigger, trigger block or history block
+				switch (blktype) {
+				case 2:		// trigger block
+					break;
+				case 4:		// history block
+					// extend sign in data
+					for (i=0; i<rlen-2; i++) if (buf[j+i+3] & 0x4000) buf[j+i+3] |= 0x8000;
+					lslope(&buf[j+3], rlen-2, &slope[64 + (chn >> 4)], &chi2[64 + (chn >> 4)]);
+					break;
+				case 1:		// channel master trigger
+					// extend sign in data
+					for (i=0; i<rlen-2; i++) if (buf[j+i+3] & 0x4000) buf[j+i+3] |= 0x8000;
+					lslope(&buf[j+3], rlen-2, &slope[chn], &chi2[chn]);
+					break;
+				default:		// wrong type
+					printf("Wrong blktype=%d encountered for master trigger test, channel %2.2X\n", blktype, chn);
+					errcnt++;
+					break;
+				}
+			}
+			j += rlen + 1;
+		} else {
+			j++;
+			errcnt++;
+		}
+	}
+
 	printf("Signal slope, ADCu/clk\n");
 	for  (i=0; i<64; i++) {
 		if (i%32 == 0) printf("Channels %2d-%2d: ", i, i+31);
 		printf("%s%6.3f%s", (0) ? KRED : KNRM, slope[i], KNRM);
 		if (i%32 == 31) printf("\n");
 	}
-	printf("Signal chi2, ADCu**2/n\n");
-	for  (i=0; i<64; i++) {
-		if (i%32 == 0) printf("Channels %2d-%2d: ", i, i+31);
-		printf("%s%6.3f%s", (0) ? KRED : KNRM, chi2[i], KNRM);
-		if (i%32 == 31) printf("\n");
+	printf("History   0-3 : ");
+	for  (i=0; i<4; i++) {
+		printf("%s%6.3f%s", (0) ? KRED : KNRM, slope[64+i], KNRM);
 	}
+	printf("\n");
 	return errcnt;
 
 }
