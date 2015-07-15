@@ -1269,6 +1269,124 @@ void lslope(short * y, int len, double * slope, double * chi2) {
 	return;
 }
 
+// Colors
+#define KNRM  "\x1B[0m"
+#define KRED  "\x1B[31m"
+#define KGRN  "\x1B[32m"
+#define KYEL  "\x1B[33m"
+#define KBLU  "\x1B[34m"
+#define KMAG  "\x1B[35m"
+#define KCYN  "\x1B[36m"
+#define KWHT  "\x1B[37m"
+
+int analyse(short *buf, int len, int ttype, int token, int blklen, double *slope, double *chi2) {
+
+	int pres[69];
+	int i, j, rlen, blktype, chn, errflag, errcnt=0;
+
+	memset(slope, 0, 68*sizeof(double));
+	memset(chi2, 0, 68*sizeof(double));
+	memset(pres, 0, sizeof(pres));
+
+	// analyse
+	for (j=0; j<len/sizeof(short); ) {
+		// control word
+		if (buf[j] & 0x8000) {
+			rlen = buf[j] & 0x1FF;
+			if (rlen == 0) {	// this is alignment
+				j++;
+				continue;
+			}
+			chn = (buf[j] >> 9) & 0x3F;
+			blktype = (buf[j+1] >> 12) & 7;
+			if (ttype < 0) {		// only selftriggers
+				if (blktype != 0) {
+					printf("Wrong blktype=%d encountered for selftrigger test, channel %2.2X\n", blktype, chn);
+					errcnt++;
+				} else {	// selftrigger block
+					// extend sign in data
+					for (i=0; i<rlen-2; i++) if (buf[j+i+3] & 0x4000) buf[j+i+3] |= 0x8000;
+					lslope(&buf[j+3], rlen-2, &slope[chn], &chi2[chn]);
+					pres[chn] ++;
+				}
+			} else {		// master trigger, trigger block or history block
+				if ((token != (buf[j+1] & 0x3FF)) || (buf[j+1] & 0x400)) {
+					printf("Token error in channel %2.2X: %3.3X(%3.3X)\n", chn, buf[j+1] & 0x7FF, token);
+					errcnt ++;
+				}
+				switch (blktype) {
+				case 2:		// trigger block
+					if (rlen != 7) {
+						printf("Wrong length of trigger block %d != 7\n", rlen);
+						errcnt ++;
+						break;
+					}
+					if (!(((chn & 0xF) == 0xF) || ((chn & 0x10) == 0x10)) || ((chn & 0x20) != 0) ) {
+						printf("Wrong trigger source %2.2X (0xF or 0x10)\n", chn);
+						errcnt ++;
+					}
+					pres[68]++;
+					break;
+				case 4:		// history block
+					if (rlen != blklen) {
+						printf("Wrong length of history block %d != %d\n", rlen, blklen);
+						errcnt ++;
+						break;
+					}
+					// extend sign in data
+					for (i=0; i<rlen-2; i++) if (buf[j+i+3] & 0x4000) buf[j+i+3] |= 0x8000;
+					lslope(&buf[j+3], rlen-2, &slope[64 + (chn >> 4)], &chi2[64 + (chn >> 4)]);
+					pres[64 + (chn >> 4)]++;
+					break;
+				case 1:		// channel master trigger
+					if (rlen != blklen) {
+						printf("Wrong length of master data block %d != %d\n", rlen, blklen);
+						errcnt ++;
+						break;
+					}
+					// extend sign in data
+					for (i=0; i<rlen-2; i++) if (buf[j+i+3] & 0x4000) buf[j+i+3] |= 0x8000;
+					lslope(&buf[j+3], rlen-2, &slope[chn], &chi2[chn]);
+					pres[chn]++;
+					break;
+				default:		// wrong type
+					printf("Wrong blktype=%d encountered for master trigger test, channel %2.2X\n", blktype, chn);
+					errcnt++;
+					break;
+				}
+			}
+			j += rlen + 1;
+		} else {
+			j++;
+			errcnt++;
+		}
+	}
+	errflag = 0;
+	for  (i=0; i<64; i++) {
+		if (pres[i] != 1) {
+			errcnt++;
+			errflag = 1;
+		}
+	}
+	if (ttype > 0) for  ( ; i<69; i++) {
+		if (pres[i] != 1) {
+			errcnt++;
+			errflag = 1;
+		}
+	}
+	if (errflag) {
+		printf("%sNot all channels present or channel encountered >1 times%s\n", KRED, KNRM);
+		for  (i=0; i< (ttype<0) ? 64 : 69; i++) {
+			if (i%32 == 0) printf("Channels %2d-%2d: ", i, i+31);
+			printf("%s%6.1d%s", (pres[i] != 1) ? KRED : KNRM, pres[i], KNRM);
+			if (i%32 == 31) printf("\n");
+		}
+		printf("\n");
+	}
+	return errcnt;
+
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //	Test All channels by applying fastest possible pedestal change
 //	cnt - repeat counter, only sign matters, repetition count is alwys 1
@@ -1281,36 +1399,29 @@ void lslope(short * y, int len, double * slope, double * chi2) {
 int uwfd64::TestAllChannels(int cnt)
 {
 
-#define KNRM  "\x1B[0m"
-#define KRED  "\x1B[31m"
-#define KGRN  "\x1B[32m"
-#define KYEL  "\x1B[33m"
-#define KBLU  "\x1B[34m"
-#define KMAG  "\x1B[35m"
-#define KCYN  "\x1B[36m"
-#define KWHT  "\x1B[37m"
-
 	const int PED_HIGH = 0x200;		// highest pedestal setting to comply with linearity	
 	const int PED_LOW = 0x4000-PED_HIGH;	// lowest pedestal setting to comply with linearity	
 	const int PED_MID = 0x2000;		// middle DAC setting
-	const int maxpeddev = 20;		// maximum allowed pedestal deviation from mid val
+	const int maxpeddev = 25;		// maximum allowed pedestal deviation from mid val
 	const double fullscalenorm = 0.608;	// average full scale
-	const double fullscaledev = 0.010;	// maximum allowed deviation from full scale
+	const double fullscaledev = 0.015;	// maximum allowed deviation from full scale
 	const int maxnonlin = 3;		// maximum difference between halfscales
 	const double maxnoise = 0.3;		// maximum averaged square of noise
+
 	int i, j;
 	int peds[3][64]; 
 	double tmp;
-	int token, rep, fifobot, errcnt, len, rlen, chn, blktype;
+	int token, fifobot, errcnt, len, blklen;
 	short *buf;
-	double slope[68], chi2[68];
+	double slope[68], chi2[68]; 
 
-	if (cnt > 0) rep = cnt; else rep = -cnt;
 	buf = (short *) malloc(MBYTE);
 	if (!buf) return -1;
 
 	// set inhibit
 	Inhibit(1);
+
+	errcnt = 0;
 
 	// check pedestals at min, mid, max
 	
@@ -1332,51 +1443,56 @@ int uwfd64::TestAllChannels(int cnt)
 	vmemap_usleep(2000);
 	for (i=0; i<64; i++) peds[2][i] = ICXRead(ICX_SLAVE_STEP * (i/16) + ICX_SLAVE_PED + (i%16));
 
-	printf("                ");
+	printf("                %s", KYEL);
 	for (i=0; i<32; i++) printf("%6d", i);
-	printf("\n");	
+	printf("%s\n", KNRM);	
 	// print pedestal deviations
 	for (i=0, tmp=0; i<64; i++) tmp += (peds[1][i] - 0x800); 
-	printf("Pedestal deviations from middle value (<%d), average = %4.1f\n", maxpeddev, tmp/64.);
+	printf("%sPedestal deviations from middle value (<%d), average = %4.1f%s\n", KCYN, maxpeddev, tmp/64., KNRM);
 	for  (i=0; i<64; i++) {
 		if (i%32 == 0) printf("Channels %2d-%2d: ", i, i+31);
 		printf("%s%6d%s", (abs(peds[1][i] - 0x800) > maxpeddev) ? KRED : KNRM, peds[1][i] - 0x800, KNRM);
 		if (i%32 == 31) printf("\n");
+		if (abs(peds[1][i] - 0x800) > maxpeddev) errcnt++;
 	}
 	// full scale
 	for (i=0, tmp=0; i<64; i++) tmp += (double)(peds[2][i] - peds[0][i])/(double)(PED_LOW-PED_HIGH)*4.; 
-	printf("Full scale (ADChigh-ADClow)/(PEDHigh-PEDlow) (within %6.3f from %6.3f), average = %6.3f\n", fullscaledev, fullscalenorm, tmp/64.);
+	printf("%sFull scale (ADChigh-ADClow)/(PEDHigh-PEDlow) (within %6.3f from %6.3f), average = %6.3f%s\n", KCYN, fullscaledev, fullscalenorm, tmp/64., KNRM);
 	for  (i=0; i<64; i++) {
 		if (i%32 == 0) printf("Channels %2d-%2d: ", i, i+31);
 		tmp = (double)(peds[2][i] - peds[0][i])/(double)(PED_LOW-PED_HIGH)*4.;
 		printf("%s%6.3f%s", (fabs(tmp - fullscalenorm) > fullscaledev) ? KRED : KNRM, tmp, KNRM);
 		if (i%32 == 31) printf("\n");
+		if (fabs(tmp - fullscalenorm) > fullscaledev) errcnt++;
 	}
 	// nonlinearity
-	printf("Nonlinearity (ADChigh-ADCmid)-(ADCmid-ADClow) (<%d)\n", maxnonlin);
+	printf("%sNonlinearity (ADChigh-ADCmid)-(ADCmid-ADClow) (<%d)%s\n", KCYN, maxnonlin, KNRM);
 	for  (i=0; i<64; i++) {
 		if (i%32 == 0) printf("Channels %2d-%2d: ", i, i+31);
 		printf("%s%6d%s", (abs(peds[2][i] + peds[0][i] - 2*peds[1][i]) > maxnonlin) ? KRED : KNRM, peds[2][i] + peds[0][i] - 2*peds[1][i], KNRM);
 		if (i%32 == 31) printf("\n");
+		if (abs(peds[2][i] + peds[0][i] - 2*peds[1][i]) > maxnonlin) errcnt++;
 	}
 
 	// set middle pedestal
 	DACSet(PED_MID);
 	vmemap_usleep(20000);
 
+	// memorise last token
+	token = a32->trig.cnt;
+	// get data block length (from first X) as appears in the control word
+	blklen = ICXRead(ICX_SLAVE_WINLEN) + 2;
+
 	// check noise with soft trigger
-	errcnt = 0;
 	// fix pedestals and enable trigger history in all 4 X's
 	for (i=0; i<4; i++) ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_CSR_OUT, SLAVE_CSR_PEDINHIBIT | SLAVE_CSR_HISTENABLE);
 	// clear memory and define beginning of the data
 	a32->fifo.csr &= ~FIFO_CSR_ENABLE;
 	fifobot = (a32->fifo.win & 0xFFFF) << 13;
-	memset(slope, 0, sizeof(slope));
-	memset(chi2, 0, sizeof(chi2));
 	// allow mwmory to get data (we always start from bot)
 	a32->fifo.csr |= FIFO_CSR_ENABLE;
 	SoftTrigger(-1);
-	vmemap_usleep(50000);
+	vmemap_usleep(5000);
 	// check errors
 	if ((j=a32->fifo.csr) & FIFO_CSR_ERROR) {
 		printf("error in fifoCSR: %8.8X\n", j);
@@ -1384,8 +1500,7 @@ int uwfd64::TestAllChannels(int cnt)
 		return -2;
 	}
 	len = a32->fifo.wptr - fifobot;		// we never wrap
-printf("len = %8.8X\n",len);
-	if (len > MBYTE) len = MBYTE;
+	if (len > MBYTE) len = MBYTE;		// just for sure
 	// read data		
 	if (vmemap_a64_dma(dma_fd, GetBase64() + fifobot, (unsigned int *)buf, len, 0)) {
 		free(buf);
@@ -1394,46 +1509,16 @@ printf("len = %8.8X\n",len);
 	// clear memory		
 	a32->fifo.csr &= ~FIFO_CSR_ENABLE;
 	// analyse
-	for (j=0; j<len/sizeof(short); ) {
-		// control word
-		if (buf[j] & 0x8000) {
-			rlen = buf[j] & 0x1FF;
-			if (rlen == 0) {	// this is alignment
-				j++;
-				continue;
-			}
-			chn = (buf[j] >> 9) & 0x3F;
-			blktype = (buf[j+1] >> 12) & 7;
-			// master trigger, trigger block or history block
-			switch (blktype) {
-			case 2:		// trigger block
-				break;
-			case 4:		// history block
-				// extend sign in data
-				for (i=0; i<rlen-2; i++) if (buf[j+i+3] & 0x4000) buf[j+i+3] |= 0x8000;
-				lslope(&buf[j+3], rlen-2, &slope[64 + (chn >> 4)], &chi2[64 + (chn >> 4)]);
-				break;
-			case 1:		// channel master trigger
-				// extend sign in data
-				for (i=0; i<rlen-2; i++) if (buf[j+i+3] & 0x4000) buf[j+i+3] |= 0x8000;
-				lslope(&buf[j+3], rlen-2, &slope[chn], &chi2[chn]);
-				break;
-			default:		// wrong type
-				printf("Wrong blktype=%d encountered for master trigger test, channel %2.2X\n", blktype, chn);
-				errcnt++;
-				break;
-			}
-			j += rlen + 1;
-		} else {
-			j++;
-			errcnt++;
-		}
-	}
-	printf("Noise (<%4.2f)\n", maxnoise);
+	errcnt += analyse(buf, len, 1, token++, blklen, slope, chi2);
+
+	tmp = 0;
+	for (i=0; i<64; i++) tmp += chi2[i];
+	printf("%sNoise (<%4.2f), average=%6.3f%s\n", KCYN, maxnoise, tmp/64., KNRM);
 	for  (i=0; i<64; i++) {
 		if (i%32 == 0) printf("Channels %2d-%2d: ", i, i+31);
 		printf("%s%6.3f%s", (chi2[i] > maxnoise) ? KRED : KNRM, chi2[i], KNRM);
 		if (i%32 == 31) printf("\n");
+		if (chi2[i] > maxnoise) errcnt++;
 	}
 	printf("History   0-3 : ");
 	for  (i=0; i<4; i++) {
@@ -1441,33 +1526,29 @@ printf("len = %8.8X\n",len);
 	}
 	printf("\n");
 
-return errcnt;
-
-
-	// memorise last token
-	token = a32->csr.in;
 	// Allow master trigger from all 4 X's if cnt > 0 (selftriggers otherwise), remove INH
-	a32->trig.csr = (cnt > 0) ? TRIG_CSR_CHAN_MASK : 0;
-	// clear memory and define beginning of the data
-	a32->fifo.csr &= ~FIFO_CSR_ENABLE;
+	if (cnt > 0)	
+		a32->trig.csr |= TRIG_CSR_CHAN_MASK;
+	else
+		a32->trig.csr &= ~TRIG_CSR_CHAN_MASK;
+	Inhibit(0);
 
-	memset(slope, 0, sizeof(slope));
-	memset(chi2, 0, sizeof(chi2));
-	// allow mwmory to get data (we always start from bot)
+	// allow memory to get data (we always start from bot)
 	a32->fifo.csr |= FIFO_CSR_ENABLE;
+
+	// start ramp signal
 	DACSet(PED_HIGH);
 	vmemap_usleep(100);
 	// make reverse pulse to cross zero fast		
 	DACSet(PED_LOW);
-	// check errors
+	// check errors, data should be there by this time
 	if ((j=a32->fifo.csr) & FIFO_CSR_ERROR) {
 		printf("error in fifoCSR: %8.8X\n", j);
 		free(buf);
 		return -2;
 	}
 	len = a32->fifo.wptr - fifobot;		// we never wrap
-printf("len = %8.8X\n",len);
-	if (len > MBYTE) len = MBYTE;
+	if (len > MBYTE) len = MBYTE;		// just for sure
 	// read data		
 	if (vmemap_a64_dma(dma_fd, GetBase64() + fifobot, (unsigned int *)buf, len, 0)) {
 		free(buf);
@@ -1486,54 +1567,11 @@ printf("len = %8.8X\n",len);
 	DACSet(PED_MID+2);
 	vmemap_usleep(1000);
 
-	// analyse
-	for (j=0; j<len/sizeof(short); ) {
-		// control word
-		if (buf[j] & 0x8000) {
-			rlen = buf[j] & 0x1FF;
-			if (rlen == 0) {	// this is alignment
-				j++;
-				continue;
-			}
-			chn = (buf[j] >> 9) & 0x3F;
-			blktype = (buf[j+1] >> 12) & 7;
-			if (cnt < 0) {		// only selftriggers
-				if (blktype != 0) {
-					printf("Wrong blktype=%d encountered for selftrigger test, channel %2.2X\n", blktype, chn);
-					errcnt++;
-				} else {	// selftrigger block
-					// extend sign in data
-					for (i=0; i<rlen-2; i++) if (buf[j+i+3] & 0x4000) buf[j+i+3] |= 0x8000;
-					lslope(&buf[j+3], rlen-2, &slope[chn], &chi2[chn]);
-				}
-			} else {		// master trigger, trigger block or history block
-				switch (blktype) {
-				case 2:		// trigger block
-					break;
-				case 4:		// history block
-					// extend sign in data
-					for (i=0; i<rlen-2; i++) if (buf[j+i+3] & 0x4000) buf[j+i+3] |= 0x8000;
-					lslope(&buf[j+3], rlen-2, &slope[64 + (chn >> 4)], &chi2[64 + (chn >> 4)]);
-					break;
-				case 1:		// channel master trigger
-					// extend sign in data
-					for (i=0; i<rlen-2; i++) if (buf[j+i+3] & 0x4000) buf[j+i+3] |= 0x8000;
-					lslope(&buf[j+3], rlen-2, &slope[chn], &chi2[chn]);
-					break;
-				default:		// wrong type
-					printf("Wrong blktype=%d encountered for master trigger test, channel %2.2X\n", blktype, chn);
-					errcnt++;
-					break;
-				}
-			}
-			j += rlen + 1;
-		} else {
-			j++;
-			errcnt++;
-		}
-	}
+	errcnt += analyse(buf, len, cnt, token, blklen, slope, chi2);
 
-	printf("Signal slope, ADCu/clk\n");
+	tmp = 0;
+	for (i=0; i<64; i++) tmp += slope[i];
+	printf("%sSignal slope, ADCu/clk, average=%6.3f%s\n", KCYN, tmp/64., KNRM);
 	for  (i=0; i<64; i++) {
 		if (i%32 == 0) printf("Channels %2d-%2d: ", i, i+31);
 		printf("%s%6.3f%s", (0) ? KRED : KNRM, slope[i], KNRM);
@@ -1544,6 +1582,7 @@ printf("len = %8.8X\n",len);
 		printf("%s%6.3f%s", (0) ? KRED : KNRM, slope[64+i], KNRM);
 	}
 	printf("\n");
+	free(buf);
 	return errcnt;
 
 }
