@@ -317,8 +317,8 @@ int uwfd64::ConfigureMasterClock(int sel, int div, int erc)
 		// Verify
 	if(I2CRead(CDCUN_CTRL_ADDR)) errcnt++;
 	if(I2CRead(CDCUN_INPUT_ADDR) != w) errcnt++;
-	for (i=0; i<3; i++) if(I2CRead(i) != CDCUN_OUT_DISABLE) errcnt++;
-	for (i=3; i<8; i++) if(I2CRead(i) != s) errcnt++;
+	for (i=0; i<3; i++) if(I2CRead(i) != CDCUN_OUT_DISABLE) { printf("should be out disable: %X %X\n", I2CRead(i), CDCUN_OUT_DISABLE);errcnt++; }
+	for (i=3; i<8; i++) if(I2CRead(i) != s) { printf("should be out select: %X %X\n", I2CRead(i), s);errcnt++; }
 	
 	return errcnt;
 }
@@ -625,6 +625,7 @@ int uwfd64::I2CRead(int addr)
 	val += a32->i2c.dat & 0xFF;
 	return val;
 err:
+printf("timeout err in ICRead adr=%d\n", addr);
 	a32->i2c.csr = I2C_SR_STOP;
 	return -10;
 }
@@ -657,6 +658,7 @@ int uwfd64::I2CWrite(int addr, int val)
 	if (i == I2C_TIMEOUT) goto err;
 	return 0;
 err:
+printf("timeout err in I2CWrite adr=%d data %X\n", addr, val);
 	a32->i2c.csr = I2C_SR_STOP;
 	return -10;
 }
@@ -736,7 +738,7 @@ int uwfd64::Init(void)
 	a32->i2c.presc[0] = I2C_PRESC & 0xFF;
 	a32->i2c.presc[1] = (I2C_PRESC >> 8) & 0xFF;
 	a32->i2c.ctr = I2C_CTR_CORE_ENABLE;
-	ConfigureMasterClock((Conf.MasterClockDiv & 4) ? 1 : 0, Conf.MasterClockDiv, Conf.MasterClockErc);
+	errcnt = ConfigureMasterClock((Conf.MasterClockDiv & 4) ? 1 : 0, Conf.MasterClockDiv, Conf.MasterClockErc);
 	// Init main CSR
 	a32->csr.out = MAIN_CSR_TRG * (Conf.MasterTrigMux & MAIN_MUX_MASK) + MAIN_CSR_INH * (Conf.MasterInhMux & MAIN_MUX_MASK) + 
 		MAIN_CSR_CLK * (Conf.MasterClockMux & MAIN_MUX_MASK) + ((MAIN_CSR_USER * Conf.TrigUserWord) & MAIN_CSR_USER_MASK);
@@ -1310,8 +1312,8 @@ int analyse(short *buf, int len, int ttype, int token, int blklen, double *slope
 					pres[chn] ++;
 				}
 			} else {		// master trigger, trigger block or history block
-				if ((token != (buf[j+1] & 0x3FF)) || (buf[j+1] & 0x400)) {
-					printf("Token error in channel %2.2X: %3.3X(%3.3X)\n", chn, buf[j+1] & 0x7FF, token);
+				if (((token & 0x3FF) != (buf[j+1] & 0x3FF)) || (buf[j+1] & 0x400)) {
+					printf("Token error in channel %2.2X: %3.3X(%3.3X)\n", chn, buf[j+1] & 0x7FF, token & 0x3FF);
 					errcnt ++;
 				}
 				switch (blktype) {
@@ -1376,7 +1378,7 @@ int analyse(short *buf, int len, int ttype, int token, int blklen, double *slope
 	}
 	if (errflag) {
 		printf("%sNot all channels present or channel encountered >1 times%s\n", KRED, KNRM);
-		for  (i=0; i< (ttype<0) ? 64 : 69; i++) {
+		for  (i=0; i< ((ttype<0) ? 64 : 69); i++) {
 			if (i%32 == 0) printf("Channels %2d-%2d: ", i, i+31);
 			printf("%s%6.1d%s", (pres[i] != 1) ? KRED : KNRM, pres[i], KNRM);
 			if (i%32 == 31) printf("\n");

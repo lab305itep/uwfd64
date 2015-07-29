@@ -727,10 +727,12 @@ void Help(void)
 	printf("\t3 - write/read 16-bit register in slave Xilinxes with random numbers;\n");
 	printf("\t4 - write/read 8-bit pattern 1 LSB register in ADCs with random numbers;\n");
 	printf("\t5 - configure and read back slave clock controller SiLabs Si5338;\n");
-	printf("\t6 - get blocks to fifo and check format (length and CW).\n");
-	printf("\t7 - Fill the 1st Mbyte with random numbers and do random address reads.\n");
+	printf("\t6 - get blocks to fifo and check format (length and CW);\n");
+	printf("\t7 - fill the 1st Mbyte with random numbers and do random address reads;\n");
+	printf("\t8 - check all channels by applying various DAC settings (amplification, noise, slope).\n");
 	printf("U num|* addr [data] - read/write 16-bit word to clock CDCUN1208LP chip using I2C;\n");
 	printf("V num|* [nadc] - scan and adjust input data delays for module num adc nadc or all adc's if omitted\n");
+	printf("W ms - wait ms milliseconds.\n");
 	printf("X num|* addr [data] - send/receive data from slave Xilinxes via SPI. addr - SPI address.\n");
 }
 
@@ -1069,6 +1071,15 @@ int Process(char *cmd, uwfd64_tool *tool)
 			ival = strtol(tok, NULL, 0);
 		}
 		tool->Adjust(serial, ival);
+		break;
+	case 'W':	// wait ms
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			ival = 0;
+		} else {
+			ival = strtol(tok, NULL, 0);
+		}
+		vmemap_usleep(1000*ival);	// ms
 		break;
 	case 'X':	// ICX
 		tok = strtok(NULL, DELIM);
