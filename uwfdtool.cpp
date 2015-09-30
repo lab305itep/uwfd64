@@ -3,6 +3,7 @@
 	Support UWFD64 modules. Test tool.
 */
 
+#define _FILE_OFFSET_BITS 64
 #include <libconfig.h>
 #include <pthread.h>
 #include <stdio.h>

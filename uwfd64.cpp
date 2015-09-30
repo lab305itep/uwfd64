@@ -2,6 +2,8 @@
 	Moscow, ITEP, I. Alekseev, D. Kalinkin, D. Svirida
 	Support UWFD64 modules.
 */
+
+#define _FILE_OFFSET_BITS 64
 #include <ctype.h>
 #include <memory.h>
 #include <stdio.h>
@@ -739,6 +741,7 @@ int uwfd64::Init(void)
 	a32->i2c.presc[1] = (I2C_PRESC >> 8) & 0xFF;
 	a32->i2c.ctr = I2C_CTR_CORE_ENABLE;
 	errcnt = ConfigureMasterClock((Conf.MasterClockDiv & 4) ? 1 : 0, Conf.MasterClockDiv, Conf.MasterClockErc);
+	if (errcnt) printf("Init %d ConfigureMasterClock failed.\n", serial);
 	// Init main CSR
 	a32->csr.out = MAIN_CSR_TRG * (Conf.MasterTrigMux & MAIN_MUX_MASK) + MAIN_CSR_INH * (Conf.MasterInhMux & MAIN_MUX_MASK) + 
 		MAIN_CSR_CLK * (Conf.MasterClockMux & MAIN_MUX_MASK) + ((MAIN_CSR_USER * Conf.TrigUserWord) & MAIN_CSR_USER_MASK);
@@ -751,15 +754,33 @@ int uwfd64::Init(void)
 	a32->fifo.csr = FIFO_CSR_HRESET | FIFO_CSR_SRESET;
 	a32->fifo.win = (Conf.FifoBegin & 0xFFFF) + ((Conf.FifoEnd & 0xFFFF) << 16);
 	// Set DAC to middle range
-	if(DACSet(Conf.DAC)) errcnt++;
+	if(DACSet(Conf.DAC)) {
+	    printf("Init %d DACSet failed.\n", serial);
+	    errcnt++;
+	}
 	// ADC power down
-	for (i=0; i<16; i++) if(ADCWrite(i, ADC_REG_PWR, ADC_PWR_DOWN)) errcnt++;
+	for (i=0; i<16; i++) if(ADCWrite(i, ADC_REG_PWR, ADC_PWR_DOWN)) {
+	    printf("Init %d ADCWrite[%d] failed.\n", serial, i);
+	    errcnt++;
+	}
 	// Set I2C on slave Xilinxes
 	for (i=0; i<4; i++) {
-		if(ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_I2C_PRCL, I2C_PRESC & 0xFF)) errcnt++;
-		if(ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_I2C_PRCH, (I2C_PRESC >> 8) & 0xFF)) errcnt++;
-		if(ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_I2C_CTR, I2C_CTR_CORE_ENABLE)) errcnt++;
-		if(ConfigureSlaveClock(i, Conf.SlaveClockFile)) errcnt++;
+		if(ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_I2C_PRCL, I2C_PRESC & 0xFF)) {
+		    printf("Init %d ICXWrite[0x%X] failed.\n", serial, ICX_SLAVE_STEP * i + ICX_SLAVE_I2C_PRCL);
+		    errcnt++;
+		}
+		if(ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_I2C_PRCH, (I2C_PRESC >> 8) & 0xFF)) {
+		    printf("Init %d ICXWrite[0x%X] failed.\n", serial, ICX_SLAVE_STEP * i + ICX_SLAVE_I2C_PRCH);
+		    errcnt++;
+		}
+		if(ICXWrite(ICX_SLAVE_STEP * i + ICX_SLAVE_I2C_CTR, I2C_CTR_CORE_ENABLE)) {
+		    printf("Init %d ICXWrite[0x%X] failed.\n", serial, ICX_SLAVE_STEP * i + ICX_SLAVE_I2C_CTR);
+		    errcnt++;
+		}
+		if(ConfigureSlaveClock(i, Conf.SlaveClockFile)) {
+		    printf("Init %d ConfigureSlaveClock[%d] failed.\n", serial, i);
+		    errcnt++;
+		}
 	}
 	// ADC power up
 	for (i=0; i<16; i++) if(ADCWrite(i, ADC_REG_PWR, 0)) errcnt++;
@@ -772,7 +793,10 @@ int uwfd64::Init(void)
 	// ADC output offset binary
 	for (i=0; i<16; i++) if(ADCWrite(i, ADC_REG_OUTPUT, 0)) errcnt++;
 	// ADC input adjust
-	if (ADCAdjust()) errcnt++;
+	if (ADCAdjust()) {
+	    printf("Init %d ADCAdjust failed.\n", serial);
+	    errcnt++;
+	}
 	for (i=0; i<4; i++) errcnt += ConfigureSlaveXilinx(i);
 	return errcnt;
 }
