@@ -6,16 +6,27 @@
 #define _FILE_OFFSET_BITS 64
 #include <libconfig.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
+#include <time.h>
 #include <readline/history.h>
 #include <readline/readline.h>
 #include "libvmemap.h"
 #include "log.h"
+#include "recformat.h"
 #include "uwfd64.h"
 
 #define WAIT4DONE	1000	// 10 s
+
+volatile sig_atomic_t StopFlag;
+
+void catch_stop(int sig)
+{
+	StopFlag = 1;
+	signal(sig, catch_stop);
+}
 
 class uwfd64_tool {
 private:
@@ -58,6 +69,7 @@ public:
 	void SoftTrigger(int serial, int freq);
 	void Test(int serial = -1, int type = 0, int cnt = 1000000);
 	void WriteFile(int serial, char *fname, int size);
+	void WriteNFile(int serial, char *fname, int size);
 };
 
 uwfd64_tool::uwfd64_tool(void)
@@ -669,14 +681,15 @@ void uwfd64_tool::WriteFile(int serial, char *fname, int size)
 		free(buf);
 		return;
 	}
-
+	
+	StopFlag = 0;
 	ptr->EnableFifo(0);	// clear FIFO
 	ptr->ResetFifo(FIFO_CSR_SRESET);
 	ptr->EnableFifo(1);	// enable FIFO
 
 	S = (long long) size * MBYTE;
 	
-	for (i=0; i<S; i += irc) {
+	for (i=0; i<S && (!StopFlag); i += irc) {
 		irc = ptr->GetFromFifo(buf, MBYTE);
 		if (irc < 0) {
 			printf("File write error %d\n", -irc);
@@ -697,11 +710,92 @@ void uwfd64_tool::WriteFile(int serial, char *fname, int size)
 	fclose(f);
 }
 
+void uwfd64_tool::WriteNFile(int serial, char *fname, int size)
+{
+	uwfd64 *ptr;
+	FILE *f;
+	long long i;
+	long long S;
+	int irc;
+	void *buf;
+	struct rec_header_struct header;
+
+	ptr = FindSerial(serial);
+	if (ptr == NULL) {
+		printf("Module %d not found.\n", serial);
+		return;
+	}
+
+	buf = malloc(MBYTE);
+	if (!buf) {
+		printf("No memory: %m.\n");
+		return;
+	}
+
+	f = fopen(fname, "wb");
+	if (!f) {
+		printf("Can not open file %s: %m.\n", fname);
+		free(buf);
+		return;
+	}
+	
+	header.len = sizeof(header);
+	header.cnt = 0;
+	header.type = REC_BEGIN;
+	header.time = time(NULL);
+	if (fwrite(&header, sizeof(header), 1, f) != 1) {
+		printf("File write error: %m.\n");
+		fclose(f);
+		return;
+	}
+
+	StopFlag = 0;
+	ptr->EnableFifo(0);	// clear FIFO
+	ptr->ResetFifo(FIFO_CSR_SRESET);
+	ptr->EnableFifo(1);	// enable FIFO
+
+	S = (long long) size * MBYTE;
+	
+	for (i=0; (i < S || size <= 0) && (!StopFlag); i += irc) {
+		irc = ptr->GetFromFifo(buf, MBYTE);
+		if (irc < 0) {
+			printf("File write error %d\n", -irc);
+			break;
+		}
+		if (irc == 0) {
+			vmemap_usleep(10000);	// nothing was there - sleep some time
+		} else {
+			header.len = irc + sizeof(header);
+			header.cnt++;
+			header.type = REC_WFDDATA + ptr->GetSerial();
+			header.time = time(NULL);
+			if (fwrite(&header, sizeof(header), 1, f) != 1) {
+				printf("File write error: %m.\n");
+				break;
+			}
+			if (fwrite(buf, irc, 1, f) != 1) {
+				printf("File write error: %m.\n");
+				break;
+			}
+		}
+	}
+
+	ptr->EnableFifo(0);
+	free(buf);
+	header.len = sizeof(header);
+	header.cnt++;
+	header.type = REC_END;
+	header.time = time(NULL);
+	if (fwrite(&header, sizeof(header), 1, f) != 1) printf("File write error: %m.\n");
+	fclose(f);
+}
+
 //*************************************************************************************************************************************//
 
 void Help(void)
 {
 	printf("\t\tCommand tool for UWFD64 debugging\n");
+	printf("Ctrl^C could be pressed to stop some long commands\n");
 	printf("Numbers can be decimal, hex (0xX) or octal (0). num|* - module serial number, * - all modules.\n");
 	printf("A addr [data] - read/write VME A16 (address is counted from 0xA000);\n");
 	printf("B addr [data] - read/write VME A32 (address is counted from 0xAA000000);\n");
@@ -735,6 +829,7 @@ void Help(void)
 	printf("V num|* [nadc] - scan and adjust input data delays for module num adc nadc or all adc's if omitted\n");
 	printf("W ms - wait ms milliseconds.\n");
 	printf("X num|* addr [data] - send/receive data from slave Xilinxes via SPI. addr - SPI address.\n");
+	printf("Y num|* size|* fname - get size Mbytes of data to new format file fname;\n");
 }
 
 int Process(char *cmd, uwfd64_tool *tool)
@@ -1105,6 +1200,29 @@ int Process(char *cmd, uwfd64_tool *tool)
 			tool->ICXRead(serial, addr);
 		}
 		break;
+	case 'Y':	// Write data to file - new format, more than one module
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need module serial number.\n");
+	    		Help();
+	    		break;
+		}
+		serial = (tok[0] == '*') ? -1 : strtol(tok, NULL, 0);
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need amount of data to get.\n");
+	    		Help();
+	    		break;
+		}
+		ival = (tok[0] == '*') ? -1 : strtol(tok, NULL, 0);
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need filename.\n");
+	    		Help();
+	    		break;
+		}
+		tool->WriteNFile(serial, tok, ival);
+		break;
 	default:
 		break;
 	}
@@ -1151,6 +1269,7 @@ int main(int argc, char **argv)
 		}
     	} else {
 		read_history(".uwfdtool_history");
+		signal(SIGINT, catch_stop);
 		for(;;) {
 	    		if (cmd) free(cmd);
 	    		cmd = readline("UWFDTool (H-help)>");
@@ -1163,6 +1282,7 @@ int main(int argc, char **argv)
 	    		if (Process(cmd, tool)) break;
 		}
 		if (cmd) free(cmd);
+		signal(SIGINT, SIG_DFL);
 		write_history(".uwfdtool_history");
     	}
 
