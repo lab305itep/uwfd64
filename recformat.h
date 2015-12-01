@@ -4,6 +4,7 @@
 struct rec_header_struct {
 	int len;
 	int cnt;
+	int ip;
 	int type;
 	int time;
 };

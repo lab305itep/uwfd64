@@ -5,20 +5,30 @@
 
 #define _FILE_OFFSET_BITS 64
 #include <libconfig.h>
+#include <netdb.h>
+#include <netinet/in.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/socket.h>
 #include <sys/time.h>
+#include <sys/types.h>
 #include <time.h>
+#include <unistd.h>
 #include <readline/history.h>
 #include <readline/readline.h>
 #include "libvmemap.h"
 #include "log.h"
 #include "recformat.h"
 #include "uwfd64.h"
-
+          
 #define WAIT4DONE	1000	// 10 s
+
+class uwfd64_tool;
+int Process(char *cmd, uwfd64_tool *tool);
+int CheckCmd(void);
+int TcpOpen(FILE **f, char *name);
 
 volatile sig_atomic_t StopFlag;
 
@@ -708,6 +718,7 @@ void uwfd64_tool::WriteFile(int serial, char *fname, int size)
 	ptr->EnableFifo(0);
 	free(buf);
 	fclose(f);
+	printf("%Ld bytes written to file %s\n", i, fname);
 }
 
 void uwfd64_tool::WriteNFile(int serial, char *fname, int size)
@@ -716,31 +727,48 @@ void uwfd64_tool::WriteNFile(int serial, char *fname, int size)
 	FILE *f;
 	long long i;
 	long long S;
-	int irc;
+	int j;
+	int irc, jrc;
 	void *buf;
 	struct rec_header_struct header;
+	char cmd[1024];
+	int active[20];		// if array element is active
 
-	ptr = FindSerial(serial);
-	if (ptr == NULL) {
-		printf("Module %d not found.\n", serial);
-		return;
+	memset(&active, 0, sizeof(active));
+	if (serial >= 0) {
+		for (j = 0; j < N; j++) if (serial == array[j]->GetSerial()) break;
+		if (j == N) {
+			printf("Module %d not found.\n", serial);
+			return;
+		}
+		active[j] = 1;
+	} else {
+		for (i = 0; i < 20; i++) if (array[i] && array[i]->GetVersion() > 0) active[i] = 1;
 	}
-
+	
 	buf = malloc(MBYTE);
 	if (!buf) {
 		printf("No memory: %m.\n");
 		return;
 	}
-
-	f = fopen(fname, "wb");
-	if (!f) {
-		printf("Can not open file %s: %m.\n", fname);
+	
+	jrc = TcpOpen(&f, fname);	// if file name is host.address:port this will return proper stream
+	if (jrc < 0) {
 		free(buf);
 		return;
+	}
+	if (!jrc) {
+		f = fopen(fname, "wb");
+		if (!f) {
+			printf("Can not open file %s: %m.\n", fname);
+			free(buf);
+			return;
+		}
 	}
 	
 	header.len = sizeof(header);
 	header.cnt = 0;
+	header.ip = 0x7F000001;		// 127.0.0.1 - loopback
 	header.type = REC_BEGIN;
 	header.time = time(NULL);
 	if (fwrite(&header, sizeof(header), 1, f) != 1) {
@@ -749,48 +777,125 @@ void uwfd64_tool::WriteNFile(int serial, char *fname, int size)
 		return;
 	}
 
+	printf("Taking data (Q to stop)> ");
+	fflush(stdout);
 	StopFlag = 0;
-	ptr->EnableFifo(0);	// clear FIFO
-	ptr->ResetFifo(FIFO_CSR_SRESET);
-	ptr->EnableFifo(1);	// enable FIFO
-
+	for (j = 0; j < N; j++) if (active[j]) {
+		ptr = array[j];
+		ptr->EnableFifo(0);	// clear FIFO
+		ptr->ResetFifo(FIFO_CSR_SRESET);
+		ptr->EnableFifo(1);	// enable FIFO
+	}
 	S = (long long) size * MBYTE;
 	
 	for (i=0; (i < S || size <= 0) && (!StopFlag); i += irc) {
-		irc = ptr->GetFromFifo(buf, MBYTE);
-		if (irc < 0) {
-			printf("File write error %d\n", -irc);
-			break;
+		if (CheckCmd() && fgets(cmd, sizeof(cmd), stdin)) {
+			if (Process(cmd, this)) break;
+			printf("Taking data (Q to stop)> ");
+			fflush(stdout);
 		}
-		if (irc == 0) {
-			vmemap_usleep(10000);	// nothing was there - sleep some time
-		} else {
-			header.len = irc + sizeof(header);
-			header.cnt++;
-			header.type = REC_WFDDATA + ptr->GetSerial();
-			header.time = time(NULL);
-			if (fwrite(&header, sizeof(header), 1, f) != 1) {
-				printf("File write error: %m.\n");
-				break;
+		
+		irc = 0;
+		for (j = 0; j < N; j++) if (active[j]) {
+			ptr = array[j];
+			jrc = ptr->GetFromFifo(buf, MBYTE);
+			if (jrc < 0) {
+				printf("Module %d FIFO error %d\n", ptr->GetSerial(), -jrc);
+				goto err;
 			}
-			if (fwrite(buf, irc, 1, f) != 1) {
-				printf("File write error: %m.\n");
-				break;
+			irc += jrc;
+			if (jrc > 0) {
+				header.len = jrc + sizeof(header);
+				header.cnt++;
+				header.type = REC_WFDDATA + ptr->GetSerial();
+				header.time = time(NULL);
+				if (fwrite(&header, sizeof(header), 1, f) != 1) {
+					printf("File write error: %m.\n");
+					goto err;
+				}
+				if (fwrite(buf, jrc, 1, f) != 1) {
+					printf("File write error: %m.\n");
+					goto err;
+				}
 			}
 		}
+		if (irc == 0) vmemap_usleep(10000);	// nothing was there - sleep some time
 	}
 
-	ptr->EnableFifo(0);
-	free(buf);
 	header.len = sizeof(header);
 	header.cnt++;
 	header.type = REC_END;
 	header.time = time(NULL);
 	if (fwrite(&header, sizeof(header), 1, f) != 1) printf("File write error: %m.\n");
+err:
+	for (j = 0; j < N; j++) if (active[j]) array[j]->EnableFifo(0);
+	free(buf);
 	fclose(f);
+	printf("%Ld bytes written to file %s\n", i, fname);
 }
 
 //*************************************************************************************************************************************//
+//	Check if we have a line from stdin. Use select.
+int CheckCmd(void)
+{
+	fd_set set;
+	int irc;
+	
+	struct timeval tmzero;
+	FD_ZERO(&set);
+	FD_SET(STDIN_FILENO, &set);
+	tmzero.tv_sec = 0;
+	tmzero.tv_usec = 0;
+	irc = select(FD_SETSIZE, &set, NULL, NULL, &tmzero);
+	if (irc < 0) return 0;
+	return FD_ISSET(STDIN_FILENO, &set);
+}
+
+int TcpOpen(FILE **f, char *name)
+{
+	char *ptr;
+	struct hostent *host;
+	struct sockaddr_in hostname;
+	int port;
+	int fd;
+	
+	*f = NULL;
+	
+	ptr = strchr(name, ':');
+	if (!ptr) return 0;
+	*ptr = '\0';
+	ptr++;
+	
+	host = gethostbyname(name);
+	if (!host) {
+		printf("host %s not found.\n", name);
+		return -1;
+	}
+	port = strtol(ptr, NULL, 0);
+	
+	hostname.sin_family = AF_INET;
+	hostname.sin_port = htons(port);
+	hostname.sin_addr = *(struct in_addr *) host->h_addr;
+
+	fd = socket(PF_INET, SOCK_STREAM, 0);
+	if (fd < 0) {
+		printf("Can not create socket %m\n");
+		return -1;
+	}
+
+	if (connect(fd, (struct sockaddr *)&hostname, sizeof(hostname))) {
+		printf("Connection to %s:%d failed %m\n", name, port);
+		return -1;
+	}
+	
+	*f = fdopen(fd, "wb");
+	if (!*f) {
+		printf("fdopen error %m\n");
+		return -1;
+	}
+	
+	return 1;
+}
 
 void Help(void)
 {
@@ -834,7 +939,7 @@ void Help(void)
 
 int Process(char *cmd, uwfd64_tool *tool)
 {
-	const char DELIM[] = " \t\n\r:=";
+	const char DELIM[] = " \t\n\r=";
     	char *tok;
 	int serial;
 	int ival;
@@ -1270,6 +1375,7 @@ int main(int argc, char **argv)
     	} else {
 		read_history(".uwfdtool_history");
 		signal(SIGINT, catch_stop);
+		signal(SIGPIPE, catch_stop);
 		for(;;) {
 	    		if (cmd) free(cmd);
 	    		cmd = readline("UWFDTool (H-help)>");
@@ -1282,6 +1388,7 @@ int main(int argc, char **argv)
 	    		if (Process(cmd, tool)) break;
 		}
 		if (cmd) free(cmd);
+		signal(SIGPIPE, SIG_DFL);
 		signal(SIGINT, SIG_DFL);
 		write_history(".uwfdtool_history");
     	}
