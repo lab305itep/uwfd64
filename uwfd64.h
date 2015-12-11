@@ -86,7 +86,10 @@ struct uwfd64_inout_reg {
 //                      in addition, programming of CDCUN required:
 //                      for modes 0-3 IN1 of CDCUN must be selected
 //                      for modes 4-7 IN2 of CDCUN must be selected
-//              CSR[15:11]       general purpose CSR outputs
+//		CSR[11]	test pulse generation enable (makes ~100 Hz ~1 us pulses on ICX[7])
+//		CSR[12]	enable trigger+inhibit mixture on FP[5:4]
+//		CSR[13]	enable token sychro blocks (type=5).
+//              CSR[15:14]       general purpose CSR outputs
 //              CSR[30:16]       user word to be put to trigger block written to memory  
 //              CSR+4 [31:0] are general inputs from the upper hierarchy, unused so far
 //
@@ -111,6 +114,9 @@ struct uwfd64_csr_reg {
 #define MAIN_CSR_INH	0x10
 #define MAIN_CSR_BLKINH	0x80
 #define MAIN_CSR_CLK	0x100
+#define MAIN_CSR_TPULSE	0x800
+#define MAIN_CSR_AUXOUT 0x1000
+#define MAIN_CSR_TOKSYNC 0x2000
 #define MAIN_CSR_USER	0x10000
 #define MAIN_CSR_USER_MASK	0x7FFF0000
 #define MAIN_CSR_RESET 	0x80000000U
@@ -581,6 +587,8 @@ struct uwfd64_module_config {
 	int MasterInhMux;	// master inhibit multiplexer setting
 	int MasterClockDiv;	// Mater clock divider (0 - 1, 1 - 2, 2 - 4, 3 - 8)
 	int MasterClockErc;	// Mater clock edge control (0 - fast, 1 - medium, 2 - slow)
+	int AuxTrigOut;		// Enable trigger+inhibit output on FP auxillary pair
+	int TokenSync;		// Enable type 5 records
 	int DAC;		// DAC setting
 	int TrigGenMask;	// Mask of slave xilinxes participating in trigger generation
 	int TrigOrTime;		// Number of clocks to OR trigger sources

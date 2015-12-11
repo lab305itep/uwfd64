@@ -744,7 +744,8 @@ int uwfd64::Init(void)
 	if (errcnt) printf("Init %d ConfigureMasterClock failed.\n", serial);
 	// Init main CSR
 	a32->csr.out = MAIN_CSR_TRG * (Conf.MasterTrigMux & MAIN_MUX_MASK) + MAIN_CSR_INH * (Conf.MasterInhMux & MAIN_MUX_MASK) + 
-		MAIN_CSR_CLK * (Conf.MasterClockMux & MAIN_MUX_MASK) + ((MAIN_CSR_USER * Conf.TrigUserWord) & MAIN_CSR_USER_MASK);
+		MAIN_CSR_CLK * (Conf.MasterClockMux & MAIN_MUX_MASK) + ((MAIN_CSR_USER * Conf.TrigUserWord) & MAIN_CSR_USER_MASK) +
+		MAIN_CSR_AUXOUT * (Conf.AuxTrigOut & 1) + MAIN_CSR_TOKSYNC * (Conf.TokenSync & 1);
 	Reset();
 	// Init Main trigger source
 	a32->trig.csr = TRIG_CSR_INHIBIT +  + ((TRIG_CSR_BLOCK * Conf.TrigBlkTime) & TRIG_CSR_BLOCK_MASK) 
@@ -1066,6 +1067,18 @@ void uwfd64::ReadConfig(config_t *cnf)
 		if (config_lookup_int(cnf, str, &tmp)) {
 			tmp %= 3;
 			Conf.MasterClockErc = tmp;
+		}
+//	int AuxTrigOut;		// Enable trigger+inhibit output on FP auxillary pair
+		sprintf(str, "%s.AuxTrigOut", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp = (tmp) ? 1 : 0;
+			Conf.AuxTrigOut = tmp;
+		}
+//	int TokenSync;		// Enable type 5 records
+		sprintf(str, "%s.TokenSync", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp = (tmp) ? 1 : 0;
+			Conf.TokenSync = tmp;
 		}
 //	int DAC;		// DAC setting
 		sprintf(str, "%s.DAC", sect);
