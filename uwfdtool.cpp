@@ -24,6 +24,8 @@
 #include "uwfd64.h"
           
 #define WAIT4DONE	1000	// 10 s
+#define PS_ACTTIME	5	// s, Pseudo cycle active time
+#define PS_WAIT		100000	// us, Pseudo cycle active passive time
 
 class uwfd64_tool;
 int Process(char *cmd, uwfd64_tool *tool);
@@ -79,7 +81,7 @@ public:
 	void SoftTrigger(int serial, int freq);
 	void Test(int serial = -1, int type = 0, int cnt = 1000000);
 	void WriteFile(int serial, char *fname, int size);
-	void WriteNFile(int serial, char *fname, int size);
+	void WriteNFile(int serial, char *fname, int size, int flag);
 };
 
 uwfd64_tool::uwfd64_tool(void)
@@ -721,7 +723,7 @@ void uwfd64_tool::WriteFile(int serial, char *fname, int size)
 	printf("%Ld bytes written to file %s\n", i, fname);
 }
 
-void uwfd64_tool::WriteNFile(int serial, char *fname, int size)
+void uwfd64_tool::WriteNFile(int serial, char *fname, int size, int flag)
 {
 	uwfd64 *ptr;
 	FILE *f;
@@ -733,6 +735,9 @@ void uwfd64_tool::WriteNFile(int serial, char *fname, int size)
 	struct rec_header_struct header;
 	char cmd[1024];
 	int active[20];		// if array element is active
+	int oldtime;
+	int iflag;
+	uwfd64 *fptr;
 
 	memset(&active, 0, sizeof(active));
 	if (serial >= 0) {
@@ -742,8 +747,13 @@ void uwfd64_tool::WriteNFile(int serial, char *fname, int size)
 			return;
 		}
 		active[j] = 1;
+		fptr = array[j];
 	} else {
-		for (i = 0; i < 20; i++) if (array[i] && array[i]->GetVersion() > 0) active[i] = 1;
+		fptr = NULL;
+		for (i = 0; i < 20; i++) if (array[i] && array[i]->GetVersion() > 0) {
+			active[i] = 1;
+			fptr = array[i];
+		}
 	}
 	
 	buf = malloc(MBYTE);
@@ -780,6 +790,7 @@ void uwfd64_tool::WriteNFile(int serial, char *fname, int size)
 	printf("Taking data (Q to stop)> ");
 	fflush(stdout);
 	StopFlag = 0;
+	if (flag == 'P') fptr->Inhibit(1);
 	for (j = 0; j < N; j++) if (active[j]) {
 		ptr = array[j];
 		ptr->EnableFifo(0);	// clear FIFO
@@ -787,6 +798,12 @@ void uwfd64_tool::WriteNFile(int serial, char *fname, int size)
 		ptr->EnableFifo(1);	// enable FIFO
 	}
 	S = (long long) size * MBYTE;
+	oldtime = time(NULL);
+	iflag = 0;
+	if (flag == 'P') {
+		fptr->ResetTrigCnt();
+		fptr->Inhibit(0);
+	}
 	
 	for (i=0; (i < S || size <= 0) && (!StopFlag); i += irc) {
 		if (CheckCmd() && fgets(cmd, sizeof(cmd), stdin)) {
@@ -794,7 +811,13 @@ void uwfd64_tool::WriteNFile(int serial, char *fname, int size)
 			printf("Taking data (Q to stop)> ");
 			fflush(stdout);
 		}
-		
+		if (flag == 'P' && time(NULL) - oldtime > PS_ACTTIME) {
+			fptr->Inhibit(1);
+			oldtime = time(NULL);
+			iflag = 1;
+			vmemap_usleep(PS_WAIT);
+		}
+
 		irc = 0;
 		for (j = 0; j < N; j++) if (active[j]) {
 			ptr = array[j];
@@ -819,7 +842,31 @@ void uwfd64_tool::WriteNFile(int serial, char *fname, int size)
 				}
 			}
 		}
+		if (iflag) {
+			header.len = sizeof(header);
+			header.cnt++;
+			header.type = REC_PSEOC;
+			header.time = time(NULL);
+			if (fwrite(&header, sizeof(header), 1, f) != 1) {
+				printf("File write error: %m.\n");
+				goto err;
+			}
+			fptr->ResetTrigCnt();
+			fptr->Inhibit(0);
+			iflag = 0;
+		}
 		if (irc == 0) vmemap_usleep(10000);	// nothing was there - sleep some time
+	}
+	if (flag == 'P') {
+		header.len = sizeof(header);
+		header.cnt++;
+		header.type = REC_PSEOC;
+		header.time = time(NULL);
+		if (fwrite(&header, sizeof(header), 1, f) != 1) {
+			printf("File write error: %m.\n");
+			goto err;
+		}
+		fptr->Inhibit(1);
 	}
 
 	header.len = sizeof(header);
@@ -828,6 +875,7 @@ void uwfd64_tool::WriteNFile(int serial, char *fname, int size)
 	header.time = time(NULL);
 	if (fwrite(&header, sizeof(header), 1, f) != 1) printf("File write error: %m.\n");
 err:
+
 	for (j = 0; j < N; j++) if (active[j]) array[j]->EnableFifo(0);
 	free(buf);
 	fclose(f);
@@ -934,7 +982,7 @@ void Help(void)
 	printf("V num|* [nadc] - scan and adjust input data delays for module num adc nadc or all adc's if omitted\n");
 	printf("W ms - wait ms milliseconds.\n");
 	printf("X num|* addr [data] - send/receive data from slave Xilinxes via SPI. addr - SPI address.\n");
-	printf("Y num|* size|* fname - get size Mbytes of data to new format file fname;\n");
+	printf("Y[P] num|* size|* fname - get size Mbytes of data to new format file fname;\n");
 }
 
 int Process(char *cmd, uwfd64_tool *tool)
@@ -945,10 +993,12 @@ int Process(char *cmd, uwfd64_tool *tool)
 	int ival;
 	int addr;
 	int num;
+	int flag;
 	long long laddr;
 
     	tok = strtok(cmd, DELIM);
     	if (tok == NULL || strlen(tok) == 0) return 0;
+	flag = toupper(tok[1]);
     	switch(toupper(tok[0])) {
 	case 'A':	// A16
 		tok = strtok(NULL, DELIM);
@@ -1326,7 +1376,7 @@ int Process(char *cmd, uwfd64_tool *tool)
 	    		Help();
 	    		break;
 		}
-		tool->WriteNFile(serial, tok, ival);
+		tool->WriteNFile(serial, tok, ival, flag);
 		break;
 	default:
 		break;

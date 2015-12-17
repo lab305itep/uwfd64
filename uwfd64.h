@@ -665,6 +665,7 @@ public:
 	void ReadConfig(config_t *cnf);
 	void Reset(void);
 	void ResetFifo(int mask = FIFO_CSR_HRESET | FIFO_CSR_SRESET);
+	inline void ResetTrigCnt(void) { a32->trig.gtime = 0; };
 	void SoftTrigger(int freq);
 	int TestAllChannels(int cnt);
 	int TestADCReg(int cnt);
