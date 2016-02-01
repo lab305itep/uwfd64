@@ -674,6 +674,7 @@ public:
 	int TestReg32(int cnt);
 	int TestSDRAM(int cnt);
 	int TestSlaveReg16(int cnt);
+	void ZeroTrigger(void);
 
 	friend class uwfd64_tool;
 };

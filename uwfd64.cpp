@@ -1683,9 +1683,9 @@ int uwfd64::TestFifo(int cnt)
 		if (vmemap_a64_dma(dma_fd, GetBase64() + raddr, (unsigned int *)buf, len, 0)) {
 //		if (vmemap_a64_blkread(A64UNIT, GetBase64() + raddr, (unsigned int *)buf, len)) {
 			free(buf);
-a32->fifo.csr = 0x90000000;	// en debug
-printf("dma read error:%m  debug = %8.8X\n", a32->fifo.csr);
-a32->fifo.csr = 0x80000000;	// dis debug
+			a32->fifo.csr = 0x90000000;	// en debug
+			printf("dma read error:%m  debug = %8.8X\n", a32->fifo.csr);
+			a32->fifo.csr = 0x80000000;	// dis debug
 			return -4;
 		}
 //		printf("\nraddr = 0x%X  len = %d\n", raddr, len);
@@ -1706,7 +1706,7 @@ a32->fifo.csr = 0x80000000;	// dis debug
 			} else {
 				errcnt++;
 				eflag++;
-				printf("Error %6d: rlen = %4d  d = %4.4X @raddr = %X, addr = %X, len = %X\n", errcnt, rlen, buf[k], raddr, raddr + 2*k, len);				
+				printf("Error %6d: rlen = %4d  d = %4.4X @raddr = %X, addr = %X, len = %X\n", errcnt, rlen, buf[k], raddr, raddr + 2*k, len);
 			}
 //			printf("%4.4X ", buf[k]);
 		}
@@ -1895,5 +1895,12 @@ int uwfd64::TestSlaveReg16(int cnt)
 		if (w != r) errcnt++;
 	}
 	return errcnt;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Reset trigger counter and token in riggen module
+void uwfd64::ZeroTrigger(void)
+{
+	a32->trig.gtime = 0;
 }
 

@@ -26,6 +26,7 @@
 #define WAIT4DONE	1000	// 10 s
 #define PS_ACTTIME	5	// s, Pseudo cycle active time
 #define PS_WAIT		100000	// us, Pseudo cycle active passive time
+#define BSIZE		0xC0000	// 3/4 MBYTE
 
 class uwfd64_tool;
 int Process(char *cmd, uwfd64_tool *tool);
@@ -50,7 +51,7 @@ private:
 	int DoTest(uwfd64 *ptr, int type, int cnt);
 	uwfd64 *FindSerial(int num);
 public:
-	uwfd64_tool(void);
+	uwfd64_tool(const char *ini_file_name = NULL);
 	~uwfd64_tool(void);
 	void A16Dump(int addr, int len);
 	void A16Read(int addr);
@@ -82,14 +83,16 @@ public:
 	void Test(int serial = -1, int type = 0, int cnt = 1000000);
 	void WriteFile(int serial, char *fname, int size);
 	void WriteNFile(int serial, char *fname, int size, int flag);
+	void ZeroTrigger(int serial);
 };
 
-uwfd64_tool::uwfd64_tool(void)
+uwfd64_tool::uwfd64_tool(const char *ini_file_name)
 {
 	uwfd64 *ptr;	
 	config_t cnf;
 	config_t *pcnf;
-	int i;
+	config_setting_t *cptr;
+	int i, num;
 
 	N = 0;
 
@@ -97,20 +100,29 @@ uwfd64_tool::uwfd64_tool(void)
 	a32 = vmemap_open(A32UNIT, A32BASE, 0x100 * A32STEP, VME_A32, VME_USER | VME_DATA, VME_D32);
 	dma_fd = vmedma_open();
 	if (!IsOK()) return;
-
-	pcnf = &cnf;
-	config_init(pcnf);
-	if (config_read_file(pcnf, "uwfdtool.conf") != CONFIG_TRUE) {
-        	printf("Configuration error in file wfdtool.conf at line %d: %s\n", 
-        		config_error_line(pcnf), config_error_text(pcnf));
-            	pcnf = NULL;
-    	}
+	
+	if (ini_file_name) {
+		pcnf = &cnf;
+		config_init(pcnf);
+		if (config_read_file(pcnf, ini_file_name) != CONFIG_TRUE) {
+        		printf("Configuration error in file %s at line %d: %s\n", ini_file_name, config_error_line(pcnf), config_error_text(pcnf));
+            		pcnf = NULL;
+    		}
+	} else {
+		pcnf = NULL;
+	}
 
 	LogInit(pcnf);
+	cptr = (pcnf) ? config_lookup(pcnf, "ModuleList") : NULL;
 
 	for (i = 0; i < 255 && N < 20; i++) {
-		ptr = new uwfd64(i, N + 2, a16, a32, dma_fd, pcnf);
-		if (!ptr->IsHere()) continue;
+		num = (cptr) ? config_setting_get_int_elem(cptr, i) : i;
+		if (cptr && !num) break;
+		ptr = new uwfd64(num, N + 2, a16, a32, dma_fd, pcnf);
+		if (!ptr->IsHere()) {
+			delete ptr;
+			continue;
+		}
 		array[N] = ptr;
 		N++;
 	}
@@ -756,7 +768,7 @@ void uwfd64_tool::WriteNFile(int serial, char *fname, int size, int flag)
 		}
 	}
 	
-	buf = malloc(MBYTE);
+	buf = malloc(BSIZE);
 	if (!buf) {
 		printf("No memory: %m.\n");
 		return;
@@ -778,7 +790,7 @@ void uwfd64_tool::WriteNFile(int serial, char *fname, int size, int flag)
 	
 	header.len = sizeof(header);
 	header.cnt = 0;
-	header.ip = 0x7F000001;		// 127.0.0.1 - loopback
+	header.ip = INADDR_LOOPBACK;		// 127.0.0.1 - loopback
 	header.type = REC_BEGIN;
 	header.time = time(NULL);
 	if (fwrite(&header, sizeof(header), 1, f) != 1) {
@@ -807,6 +819,10 @@ void uwfd64_tool::WriteNFile(int serial, char *fname, int size, int flag)
 	
 	for (i=0; (i < S || size <= 0) && (!StopFlag); i += irc) {
 		if (CheckCmd() && fgets(cmd, sizeof(cmd), stdin)) {
+			if (!isatty(STDIN_FILENO)) {
+				printf(cmd);
+				fflush(stdout);
+			}
 			if (Process(cmd, this)) break;
 			printf("Taking data (Q to stop)> ");
 			fflush(stdout);
@@ -821,7 +837,7 @@ void uwfd64_tool::WriteNFile(int serial, char *fname, int size, int flag)
 		irc = 0;
 		for (j = 0; j < N; j++) if (active[j]) {
 			ptr = array[j];
-			jrc = ptr->GetFromFifo(buf, MBYTE);
+			jrc = ptr->GetFromFifo(buf, BSIZE);
 			if (jrc < 0) {
 				printf("Module %d FIFO error %d\n", ptr->GetSerial(), -jrc);
 				goto err;
@@ -880,6 +896,22 @@ err:
 	free(buf);
 	fclose(f);
 	printf("%Ld bytes written to file %s\n", i, fname);
+}
+
+void uwfd64_tool::ZeroTrigger(int serial)
+{
+	int i;
+	uwfd64 *ptr;
+	if (serial < 0) {
+		for (i=0; i<N; i++) array[i]->ZeroTrigger();
+	} else {
+		ptr = FindSerial(serial);
+		if (ptr == NULL) {
+			printf("Module %d not found.\n", serial);
+			return;
+		}
+		ptr->ZeroTrigger();
+	}
 }
 
 //*************************************************************************************************************************************//
@@ -948,6 +980,14 @@ int TcpOpen(FILE **f, char *name)
 void Help(void)
 {
 	printf("\t\tCommand tool for UWFD64 debugging\n");
+	printf("Usage uwfdtool [options] [command]\n");
+	printf("\tOptions:\n");
+	printf("-c file_name - use configuration file file_name. No default configuration.\n");
+	printf("\t\tConfiguration for modules could be set later in Init command.\n");
+	printf("-h - print this message.\n"); 
+	printf("\tCommand - set of interactive mode commands put in quotes.\n");
+	printf("Multiple commands can be combined in a command separated by semicolons.\n");
+	printf("\t\t\tInteractive commands:\n");
 	printf("Ctrl^C could be pressed to stop some long commands\n");
 	printf("Numbers can be decimal, hex (0xX) or octal (0). num|* - module serial number, * - all modules.\n");
 	printf("A addr [data] - read/write VME A16 (address is counted from 0xA000);\n");
@@ -983,6 +1023,7 @@ void Help(void)
 	printf("W ms - wait ms milliseconds.\n");
 	printf("X num|* addr [data] - send/receive data from slave Xilinxes via SPI. addr - SPI address.\n");
 	printf("Y[P] num|* size|* fname - get size Mbytes of data to new format file fname;\n");
+	printf("Z num|*. - reset trigger/token counters in triggen\n");
 }
 
 int Process(char *cmd, uwfd64_tool *tool)
@@ -1378,6 +1419,16 @@ int Process(char *cmd, uwfd64_tool *tool)
 		}
 		tool->WriteNFile(serial, tok, ival, flag);
 		break;
+	case 'Z':
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need module serial number or *.\n");
+	    		Help();
+	    		break;
+		}
+		serial = (tok[0] == '*') ? -1 : strtol(tok, NULL, 0);
+		tool->ZeroTrigger(serial);
+		break;
 	default:
 		break;
 	}
@@ -1391,16 +1442,39 @@ int main(int argc, char **argv)
     	char tok[256];
     	char *ptr;
 	uwfd64_tool *tool;
+	char *ini_file_name;
+	int c;
+	
+	ini_file_name = NULL;
+	for (;;) {
+		c = getopt(argc, argv, "c:h");
+		if (c == -1) break;
+		switch (c) {
+		case 'c':
+			ini_file_name = optarg;
+			break;
+		case 'h':
+		default:
+			Help();
+			return 0;
+		}
+	}
 
-	tool = new uwfd64_tool();
+	if (!isatty(STDIN_FILENO)) {
+		setvbuf(stdin, NULL, _IONBF, 0);
+		printf("Non-interactive mode\n");
+		fflush(stdout);
+	}
+
+	tool = new uwfd64_tool(ini_file_name);
 //	printf("The tool created...\n");
 	if (!tool->IsOK()) {
 		printf("Can not open VME.\n");
 		return -10;
 	}
 
-    	if (argc > 1) {
-		ptr = argv[1];
+    	if (optind < argc) {
+		ptr = argv[optind];
 		for (;ptr[0] != '\0';) {
 	    		for (j=0; j < sizeof(tok)-1; j++) {
 	        		if (ptr[j] == ';') {
