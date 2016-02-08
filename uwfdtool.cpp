@@ -856,6 +856,7 @@ void uwfd64_tool::WriteNFile(int serial, char *fname, int size, int flag)
 					printf("File write error: %m.\n");
 					goto err;
 				}
+				fflush(f);
 			}
 		}
 		if (iflag) {
@@ -883,6 +884,7 @@ void uwfd64_tool::WriteNFile(int serial, char *fname, int size, int flag)
 			goto err;
 		}
 		fptr->Inhibit(1);
+		fflush(f);
 	}
 
 	header.len = sizeof(header);
