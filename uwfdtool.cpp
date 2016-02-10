@@ -50,6 +50,7 @@ private:
 	int dma_fd;
 	int DoTest(uwfd64 *ptr, int type, int cnt);
 	uwfd64 *FindSerial(int num);
+	int Status;
 public:
 	uwfd64_tool(const char *ini_file_name = NULL);
 	~uwfd64_tool(void);
@@ -64,8 +65,10 @@ public:
 	void A64Write(long long addr, int val);
 	void ADCRead(int serial, int num, int addr);	
 	void ADCWrite(int serial, int num, int addr, int ival);
+	inline void ClearStatus(void) { Status = 0;};
 	void Adjust(int serial, int adc);
 	void DACSet(int serial = -1, int val = 0x2000);
+	inline int GetStatus(void) { return Status; };
 	void I2CRead(int serial, int addr);	
 	void I2CWrite(int serial, int addr, int ival);
 	inline int IsOK(void) { return a16 && a32 && (dma_fd >= 0); };
@@ -74,11 +77,12 @@ public:
 	void ICXWrite(int serial, int addr, int ival);
 	void Inhibit(int serial, int what);
 	void Init(int serial = -1);
-	void L2CRead(int serial, int num, int addr);	
+	void L2CRead(int serial, int num, int addr);
 	void L2CWrite(int serial, int num, int addr, int ival);
 	void List(void);
 	void Prog(int serial = -1, char *fname = NULL);
 	void ReadConfig(char *fname);
+	inline void SetStatus(void) { Status = 1;};
 	void SoftTrigger(int serial, int freq);
 	void Test(int serial = -1, int type = 0, int cnt = 1000000);
 	void WriteFile(int serial, char *fname, int size);
@@ -95,6 +99,7 @@ uwfd64_tool::uwfd64_tool(const char *ini_file_name)
 	int i, num;
 
 	N = 0;
+	Status = 0;
 
 	a16 = (unsigned short *) vmemap_open(A16UNIT, A16BASE, 0x100 * A16STEP, VME_A16, VME_USER | VME_DATA, VME_D16);
 	a32 = vmemap_open(A32UNIT, A32BASE, 0x100 * A32STEP, VME_A32, VME_USER | VME_DATA, VME_D32);
@@ -892,12 +897,13 @@ void uwfd64_tool::WriteNFile(int serial, char *fname, int size, int flag)
 	header.type = REC_END;
 	header.time = time(NULL);
 	if (fwrite(&header, sizeof(header), 1, f) != 1) printf("File write error: %m.\n");
-err:
 
+err:
 	for (j = 0; j < N; j++) if (active[j]) array[j]->EnableFifo(0);
 	free(buf);
 	fclose(f);
 	printf("%Ld bytes written to file %s\n", i, fname);
+	Status = 1;	// this is possibly not error, but DSINK needs to know that we are not in aquisition state
 }
 
 void uwfd64_tool::ZeroTrigger(int serial)
@@ -1026,6 +1032,7 @@ void Help(void)
 	printf("X num|* addr [data] - send/receive data from slave Xilinxes via SPI. addr - SPI address.\n");
 	printf("Y[P] num|* size|* fname - get size Mbytes of data to new format file fname;\n");
 	printf("Z num|*. - reset trigger/token counters in triggen\n");
+	printf("? - get return status of the last command\n");
 }
 
 int Process(char *cmd, uwfd64_tool *tool)
@@ -1044,6 +1051,7 @@ int Process(char *cmd, uwfd64_tool *tool)
 	flag = toupper(tok[1]);
     	switch(toupper(tok[0])) {
 	case 'A':	// A16
+	    	tool->SetStatus();
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {
 			printf("Need address.\n");
@@ -1058,8 +1066,10 @@ int Process(char *cmd, uwfd64_tool *tool)
 		} else {
 			tool->A16Read(addr);
 		}
+		tool->ClearStatus();
 		break;
 	case 'B':	// A32
+	    	tool->SetStatus();
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {
 			printf("Need address.\n");
@@ -1074,8 +1084,10 @@ int Process(char *cmd, uwfd64_tool *tool)
 		} else {
 			tool->A32Read(addr);
 		}
+		tool->ClearStatus();
 		break;
 	case 'C':	// A64
+	    	tool->SetStatus();
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {
 			printf("Need address.\n");
@@ -1090,8 +1102,10 @@ int Process(char *cmd, uwfd64_tool *tool)
 		} else {
 			tool->A64Read(laddr);
 		}
+		tool->ClearStatus();
 		break;
 	case 'D':	// DAC
+	    	tool->SetStatus();
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {
 			printf("Need module serial number or *.\n");
@@ -1109,6 +1123,7 @@ int Process(char *cmd, uwfd64_tool *tool)
 		tool->DACSet(serial, ival);
 		break;
 	case 'E':	// A16 dump
+	    	tool->SetStatus();
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {
 			printf("Need address.\n");
@@ -1118,8 +1133,10 @@ int Process(char *cmd, uwfd64_tool *tool)
 		addr = strtol(tok, NULL, 0);
 		tok = strtok(NULL, DELIM);
 		tool->A16Dump(addr, (tok) ? strtol(tok, NULL, 0) : 0x10);
+		tool->ClearStatus();
 		break;
 	case 'F':	// A32 dump
+	    	tool->SetStatus();
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {
 			printf("Need address.\n");
@@ -1129,8 +1146,10 @@ int Process(char *cmd, uwfd64_tool *tool)
 		addr = strtol(tok, NULL, 0);
 		tok = strtok(NULL, DELIM);
 		tool->A32Dump(addr, (tok) ? strtol(tok, NULL, 0) : 0x400);
+		tool->ClearStatus();
 		break;
 	case 'G':	// A64 dump
+	    	tool->SetStatus();
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {
 			printf("Need address.\n");
@@ -1140,11 +1159,14 @@ int Process(char *cmd, uwfd64_tool *tool)
 		laddr = strtoll(tok, NULL, 0);
 		tok = strtok(NULL, DELIM);
 		tool->A64Dump(laddr, (tok) ? strtol(tok, NULL, 0) : 0x400);
+		tool->ClearStatus();
 		break;
 	case 'H':	// Help
         	Help();
+        	tool->ClearStatus();
         	break;
 	case 'I':	// Init
+	    	tool->SetStatus();
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {
 			printf("Need module serial number or *.\n");
@@ -1157,6 +1179,7 @@ int Process(char *cmd, uwfd64_tool *tool)
 		tool->Init(serial);
 		break;
 	case 'J':	// ICX dump
+	    	tool->SetStatus();
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {
 			printf("Need module serial number or *.\n");
@@ -1176,6 +1199,7 @@ int Process(char *cmd, uwfd64_tool *tool)
 		tool->ICXDump(serial, addr, ival);
 		break;
 	case 'K':	// Soft trigger
+	    	tool->SetStatus();
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {
 			printf("Need module serial number or *.\n");
@@ -1194,8 +1218,10 @@ int Process(char *cmd, uwfd64_tool *tool)
 		break;
 	case 'L':	// List
         	tool->List();
+        	tool->ClearStatus();
         	break;
 	case 'M':	// Inhibit
+	    	tool->SetStatus();
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {
 			printf("Need module serial number or *.\n");
@@ -1213,6 +1239,7 @@ int Process(char *cmd, uwfd64_tool *tool)
 		tool->Inhibit(serial, ival);
 		break;
 	case 'N':	// Write data to file
+	    	tool->SetStatus();
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {
 			printf("Need module serial number.\n");
@@ -1236,6 +1263,7 @@ int Process(char *cmd, uwfd64_tool *tool)
 		tool->WriteFile(serial, tok, ival);
 		break;
 	case 'P':	// Prog
+	    	tool->SetStatus();
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {
 			printf("Need module serial number or *.\n");
@@ -1249,6 +1277,7 @@ int Process(char *cmd, uwfd64_tool *tool)
 	case 'Q':	// Quit
         	return 1;
 	case 'R':	// ADC Registers
+	    	tool->SetStatus();
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {
 			printf("Need module serial number or *.\n");
@@ -1279,6 +1308,7 @@ int Process(char *cmd, uwfd64_tool *tool)
 		}
 		break;		
 	case 'S':	// Si5338 Registers
+	    	tool->SetStatus();
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {
 			printf("Need module serial number or *.\n");
@@ -1307,8 +1337,9 @@ int Process(char *cmd, uwfd64_tool *tool)
 		} else {
 			tool->L2CRead(serial, num, addr);
 		}
-		break;		
+		break;
 	case 'T':	// Test
+	    	tool->SetStatus();
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {
 			printf("Need module serial number or *.\n");
@@ -1328,6 +1359,7 @@ int Process(char *cmd, uwfd64_tool *tool)
 		tool->Test(serial, addr, ival);
 		break;
 	case 'U':	// I2C
+	    	tool->SetStatus();
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {
 			printf("Need module serial number or *.\n");
@@ -1351,6 +1383,7 @@ int Process(char *cmd, uwfd64_tool *tool)
 		}
 		break;		
 	case 'V':	// scan/adjust ADC delays
+	    	tool->SetStatus();
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {
 			printf("Need module serial number.\n");
@@ -1374,8 +1407,10 @@ int Process(char *cmd, uwfd64_tool *tool)
 			ival = strtol(tok, NULL, 0);
 		}
 		vmemap_usleep(1000*ival);	// ms
+	    	tool->ClearStatus();
 		break;
 	case 'X':	// ICX
+	    	tool->SetStatus();
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {
 			printf("Need module serial number or *.\n");
@@ -1399,6 +1434,7 @@ int Process(char *cmd, uwfd64_tool *tool)
 		}
 		break;
 	case 'Y':	// Write data to file - new format, more than one module
+	    	tool->SetStatus();
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {
 			printf("Need module serial number.\n");
@@ -1422,6 +1458,7 @@ int Process(char *cmd, uwfd64_tool *tool)
 		tool->WriteNFile(serial, tok, ival, flag);
 		break;
 	case 'Z':
+	    	tool->SetStatus();
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {
 			printf("Need module serial number or *.\n");
@@ -1431,7 +1468,11 @@ int Process(char *cmd, uwfd64_tool *tool)
 		serial = (tok[0] == '*') ? -1 : strtol(tok, NULL, 0);
 		tool->ZeroTrigger(serial);
 		break;
+	case '?':
+		printf("__%4.4d", tool->GetStatus(););
+		break;
 	default:
+	    	tool->SetStatus();
 		break;
 	}
 	return 0;
