@@ -291,6 +291,7 @@ void uwfd64_tool::ADCRead(int serial, int num, int addr)
 		}
 		printf("Module %d@%d ADC[%X:%X] = %X\n", serial, ptr->GetGA(), num, addr, ptr->ADCRead(num, addr));
 	}
+	ClearStatus();
 }
 
 void uwfd64_tool::ADCWrite(int serial, int num, int addr, int val)
@@ -307,17 +308,19 @@ void uwfd64_tool::ADCWrite(int serial, int num, int addr, int val)
 		}
 		ptr->ADCWrite(num, addr, val);
 	}
+	ClearStatus();
 }
 
 void uwfd64_tool::Adjust(int serial, int adc)
 {
-	int i;
+	int i, irc;
 	uwfd64 *ptr;
+	irc = 0;
 	if (serial < 0) {
 		if (adc < 0) {
-			for (i=0; i<N; i++) array[i]->ADCAdjust(0x3FFFF);
+			for (i=0; i<N; i++) if (array[i]->ADCAdjust(0x3FFFF)) irc++;
 		} else {
-			for (i=0; i<N; i++) array[i]->ADCAdjust((1 << adc) | 0x30000);
+			for (i=0; i<N; i++) if (array[i]->ADCAdjust((1 << adc) | 0x30000)) irc++;
 		}
 	} else {
 		ptr = FindSerial(serial);
@@ -326,11 +329,12 @@ void uwfd64_tool::Adjust(int serial, int adc)
 			return;
 		}
 		if (adc < 0) {
-			ptr->ADCAdjust(0x3FFFF);
+			if(ptr->ADCAdjust(0x3FFFF)) irc++;
 		} else {
-			ptr->ADCAdjust((1 << adc) | 0x30000);	
+			if(ptr->ADCAdjust((1 << adc) | 0x30000)) irc++;
 		}
 	}
+	if (!irc) ClearStatus();
 }
 
 void uwfd64_tool::DACSet(int serial, int val)
@@ -347,6 +351,7 @@ void uwfd64_tool::DACSet(int serial, int val)
 		}
 		ptr->DACSet(val);
 	}
+	ClearStatus();
 }
 
 int uwfd64_tool::DoTest(uwfd64 *ptr, int type, int cnt)
@@ -413,6 +418,7 @@ void uwfd64_tool::I2CRead(int serial, int addr)
 		}
 		printf("Module %d@%d I2C[%X] = %X\n", serial, ptr->GetGA(), addr, ptr->I2CRead(addr));
 	}
+	ClearStatus();
 }
 
 void uwfd64_tool::I2CWrite(int serial, int addr, int val)
@@ -429,6 +435,7 @@ void uwfd64_tool::I2CWrite(int serial, int addr, int val)
 		}
 		ptr->I2CWrite(addr, val);
 	}
+	ClearStatus();
 }
 
 void uwfd64_tool::ICXDump(int serial, int addr, int len)
@@ -453,6 +460,7 @@ void uwfd64_tool::ICXDump(int serial, int addr, int len)
 		}
 		if (i & 0xF) printf("\n");
 	}
+	ClearStatus();
 }
 
 void uwfd64_tool::ICXRead(int serial, int addr)
@@ -470,6 +478,7 @@ void uwfd64_tool::ICXRead(int serial, int addr)
 		}
 		printf("Module %d@%d ICX[%X] = %X\n", serial, ptr->GetGA(), addr, ptr->ICXRead(addr));
 	}
+	ClearStatus();
 }
 
 void uwfd64_tool::ICXWrite(int serial, int addr, int val)
@@ -486,6 +495,7 @@ void uwfd64_tool::ICXWrite(int serial, int addr, int val)
 		}
 		ptr->ICXWrite(addr, val);
 	}
+	ClearStatus();
 }
 
 void uwfd64_tool::Inhibit(int serial, int what)
@@ -502,6 +512,7 @@ void uwfd64_tool::Inhibit(int serial, int what)
 		}
 		ptr->Inhibit(what);
 	}
+	ClearStatus();
 }
 
 void uwfd64_tool::Init(int serial)
@@ -533,6 +544,7 @@ void uwfd64_tool::Init(int serial)
 		printf("Initialization: %d errors found.\n", errcnt);
 	} else {
 		printf("Initialization done. No errors.\n");
+		ClearStatus();
 	}
 }
 
@@ -551,6 +563,7 @@ void uwfd64_tool::L2CRead(int serial, int num, int addr)
 		}
 		printf("Module %d@%d Si5338[%X:%X] = %X\n", serial, ptr->GetGA(), num, addr, ptr->L2CRead(num, addr));
 	}
+	ClearStatus();
 }
 
 void uwfd64_tool::L2CWrite(int serial, int num, int addr, int val)
@@ -567,6 +580,7 @@ void uwfd64_tool::L2CWrite(int serial, int num, int addr, int val)
 		}
 		ptr->L2CWrite(num, addr, val);
 	}
+	ClearStatus();
 }
 
 void uwfd64_tool::List(void)
@@ -595,8 +609,10 @@ void uwfd64_tool::List(void)
 
 void uwfd64_tool::Prog(int serial, char *fname)
 {
-	int i;
+	int i, irc, errcnt;
 	uwfd64 *ptr;
+	
+	errcnt = 0;
 	if (serial < 0) {
 		printf("Modules: ");
 		for (i=0; i<N; i++) {
@@ -606,8 +622,10 @@ void uwfd64_tool::Prog(int serial, char *fname)
 		}
 		printf("\n   Done: ");
 		for (i=0; i<N; i++) {
-			printf("%3s ", (array[i]->IsDone(WAIT4DONE)) ? "Yes" : "No");	// 10 s
+			irc = array[i]->IsDone(WAIT4DONE);
+			printf("%3s ", (irc) ? "Yes" : "No");	// 10 s
 			fflush(stdout);
+			if (!irc) errcnt++;
 		}
 		printf("\n");
 	} else {
@@ -617,8 +635,11 @@ void uwfd64_tool::Prog(int serial, char *fname)
 			return;
 		}
 		ptr->Prog(fname);
-		printf("Done: %4s\n", (ptr->IsDone(WAIT4DONE)) ? "Yes" : "No");	// 10 s
+		irc = ptr->IsDone(WAIT4DONE);
+		printf("Done: %4s\n", (irc) ? "Yes" : "No");	// 10 s
+		if (!irc) errcnt++;
 	}
+	if (!errcnt) ClearStatus();
 }
 
 void uwfd64_tool::ReadConfig(char *fname)
@@ -633,6 +654,7 @@ void uwfd64_tool::ReadConfig(char *fname)
             	return;
     	}
 	for (i=0; i<N; i++) array[i]->ReadConfig(&cnf);
+	ClearStatus();
 }
 
 void uwfd64_tool::SoftTrigger(int serial, int freq)
@@ -649,16 +671,18 @@ void uwfd64_tool::SoftTrigger(int serial, int freq)
 		}
 		ptr->SoftTrigger(freq);
 	}
+	ClearStatus();
 }
 
 void uwfd64_tool::Test(int serial, int type, int cnt)
 {
 	int i;
-	int irc;
+	int irc, errcnt;
 	double dt;
 	uwfd64 *ptr;
 	struct timeval t[2];
 
+	errcnt = 0;
 	if (serial < 0) {
 		for (i=0; i<N; i++) {
 			gettimeofday(&t[0], NULL);
@@ -667,6 +691,7 @@ void uwfd64_tool::Test(int serial, int type, int cnt)
 			dt = t[1].tv_sec - t[0].tv_sec + (t[1].tv_usec - t[0].tv_usec) * 0.000001;
 			printf("Serial %d test %d done with %d/%d errors in %8.3f s.\n",
 				array[i]->GetSerial(), type, irc, cnt, dt);
+			if (irc) errcnt++;
 		}
 	} else {
 		ptr = FindSerial(serial);
@@ -680,7 +705,9 @@ void uwfd64_tool::Test(int serial, int type, int cnt)
 		dt = t[1].tv_sec - t[0].tv_sec + (t[1].tv_usec - t[0].tv_usec) * 0.000001;
 		printf("Serial %d test %d done with %d/%d errors in %8.3f s.\n",
 			ptr->GetSerial(), type, irc, cnt, dt);
+		if (irc) errcnt++;
 	}
+	if (!errcnt) ClearStatus();
 }
 
 void uwfd64_tool::WriteFile(int serial, char *fname, int size)
@@ -738,6 +765,7 @@ void uwfd64_tool::WriteFile(int serial, char *fname, int size)
 	free(buf);
 	fclose(f);
 	printf("%Ld bytes written to file %s\n", i, fname);
+	ClearStatus();
 }
 
 void uwfd64_tool::WriteNFile(int serial, char *fname, int size, int flag)
@@ -807,6 +835,7 @@ void uwfd64_tool::WriteNFile(int serial, char *fname, int size, int flag)
 	printf("Taking data (Q to stop)> ");
 	fflush(stdout);
 	StopFlag = 0;
+	ClearStatus();
 	if (flag == 'P') fptr->Inhibit(1);
 	for (j = 0; j < N; j++) if (active[j]) {
 		ptr = array[j];
@@ -903,7 +932,7 @@ err:
 	free(buf);
 	fclose(f);
 	printf("%Ld bytes written to file %s\n", i, fname);
-	Status = 1;	// this is possibly not error, but DSINK needs to know that we are not in aquisition state
+	SetStatus();	// this is possibly not error, but DSINK needs to know that we are not in aquisition state
 }
 
 void uwfd64_tool::ZeroTrigger(int serial)
@@ -920,6 +949,7 @@ void uwfd64_tool::ZeroTrigger(int serial)
 		}
 		ptr->ZeroTrigger();
 	}
+	ClearStatus();
 }
 
 //*************************************************************************************************************************************//
@@ -1469,7 +1499,7 @@ int Process(char *cmd, uwfd64_tool *tool)
 		tool->ZeroTrigger(serial);
 		break;
 	case '?':
-		printf("__%4.4d", tool->GetStatus(););
+		printf("__%4.4d\n", tool->GetStatus());
 		break;
 	default:
 	    	tool->SetStatus();
@@ -1488,7 +1518,7 @@ int main(int argc, char **argv)
 	char *ini_file_name;
 	int c;
 	
-	ini_file_name = NULL;
+	ini_file_name = (char *) "uwfdtool.conf";
 	for (;;) {
 		c = getopt(argc, argv, "c:h");
 		if (c == -1) break;
