@@ -748,7 +748,8 @@ int uwfd64::Init(void)
 		MAIN_CSR_AUXOUT * (Conf.AuxTrigOut & 1) + MAIN_CSR_TOKSYNC * (Conf.TokenSync & 1);
 	Reset();
 	// Init Main trigger source
-	a32->trig.csr = TRIG_CSR_INHIBIT +  + ((TRIG_CSR_BLOCK * Conf.TrigBlkTime) & TRIG_CSR_BLOCK_MASK) 
+	a32->trig.csr = TRIG_CSR_INHIBIT + TRIG_CSR_AUXIN * Conf.AuxTrigIn + TRIG_CSR_TRIG2FIFO * Conf.MasterTrig2FIFO 
+		+ ((TRIG_CSR_BLOCK * Conf.TrigBlkTime) & TRIG_CSR_BLOCK_MASK) 
 		+ ((TRIG_CSR_SRCOR * Conf.TrigOrTime) & TRIG_CSR_SRCOR_MASK) + ((TRIG_CSR_CHAN * Conf.TrigGenMask) & TRIG_CSR_CHAN_MASK);
 	a32->trig.gtime = 0;	// reset counters
 	// Init SDRAM FIFO
@@ -1073,6 +1074,18 @@ void uwfd64::ReadConfig(config_t *cnf)
 		if (config_lookup_int(cnf, str, &tmp)) {
 			tmp = (tmp) ? 1 : 0;
 			Conf.AuxTrigOut = tmp;
+		}
+//	int AuxTrigIn;		// Enable auxillary trigger input
+		sprintf(str, "%s.AuxTrigIn", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp = (tmp) ? 1 : 0;
+			Conf.AuxTrigIn = tmp;
+		}
+//	int MasterTrig2FIFO;	// Enable trigger blocks (type 2) to data FIFO
+		sprintf(str, "%s.MasterTrig2FIFO", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp = (tmp) ? 1 : 0;
+			Conf.MasterTrig2FIFO = tmp;
 		}
 //	int TokenSync;		// Enable type 5 records
 		sprintf(str, "%s.TokenSync", sect);
@@ -1895,6 +1908,17 @@ int uwfd64::TestSlaveReg16(int cnt)
 		if (w != r) errcnt++;
 	}
 	return errcnt;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Write User word which is added to trigger block information
+void uwfd64::WriteUserWord(int num)
+{
+	int tmp;
+	tmp = a32->csr.out;
+	tmp &= ~MAIN_CSR_USER_MASK;
+	tmp |= (num * MAIN_CSR_USER) & MAIN_CSR_USER_MASK;
+	a32->csr.out = tmp;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////

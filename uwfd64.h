@@ -168,6 +168,8 @@ struct uwfd64_trig_reg {
 #define TRIG_CSR_BLOCK_MASK	0xFF80
 #define TRIG_CSR_SOFT		0x10000
 #define TRIG_CSR_SOFT_MASK	0x1FFF0000
+#define TRIG_CSR_AUXIN		0x20000000
+#define TRIG_CSR_TRIG2FIFO	0x40000000
 #define TRIG_CSR_INHIBIT	0x80000000U
 
 struct uwfd64_spi_reg {
@@ -588,6 +590,8 @@ struct uwfd64_module_config {
 	int MasterClockDiv;	// Mater clock divider (0 - 1, 1 - 2, 2 - 4, 3 - 8)
 	int MasterClockErc;	// Mater clock edge control (0 - fast, 1 - medium, 2 - slow)
 	int AuxTrigOut;		// Enable trigger+inhibit output on FP auxillary pair
+	int AuxTrigIn;		// Enable auxillary trigger input
+	int MasterTrig2FIFO;	// Enable trigger blocks (type 2) to data FIFO
 	int TokenSync;		// Enable type 5 records
 	int DAC;		// DAC setting
 	int TrigGenMask;	// Mask of slave xilinxes participating in trigger generation
@@ -674,6 +678,7 @@ public:
 	int TestReg32(int cnt);
 	int TestSDRAM(int cnt);
 	int TestSlaveReg16(int cnt);
+	void WriteUserWord(int num);
 	void ZeroTrigger(void);
 
 	friend class uwfd64_tool;

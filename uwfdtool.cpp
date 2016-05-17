@@ -782,6 +782,7 @@ void uwfd64_tool::WriteNFile(int serial, char *fname, int size, int flag)
 	int active[20];		// if array element is active
 	int oldtime;
 	int iflag;
+	int iCycleCnt;
 	uwfd64 *fptr;
 
 	memset(&active, 0, sizeof(active));
@@ -847,9 +848,11 @@ void uwfd64_tool::WriteNFile(int serial, char *fname, int size, int flag)
 	oldtime = time(NULL);
 	iflag = 0;
 	if (flag == 'P') {
-		fptr->ResetTrigCnt();
+//		fptr->ResetTrigCnt();
+		fptr->WriteUserWord(iCycleCnt);
 		fptr->Inhibit(0);
 	}
+	iCycleCnt = 0;
 	
 	for (i=0; (i < S || size <= 0) && (!StopFlag); i += irc) {
 		if (CheckCmd() && fgets(cmd, sizeof(cmd), stdin)) {
@@ -902,9 +905,11 @@ void uwfd64_tool::WriteNFile(int serial, char *fname, int size, int flag)
 				printf("File write error: %m.\n");
 				goto err;
 			}
-			fptr->ResetTrigCnt();
+//			fptr->ResetTrigCnt();
 			fptr->Inhibit(0);
 			iflag = 0;
+			iCycleCnt++;
+			fptr->WriteUserWord(iCycleCnt);
 		}
 		if (irc == 0) vmemap_usleep(10000);	// nothing was there - sleep some time
 	}
