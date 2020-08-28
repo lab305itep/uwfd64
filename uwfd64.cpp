@@ -592,7 +592,6 @@ int uwfd64::GetFromFifo(void *buf, int size)
 	return len;
 }
 
-
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //	Read CDCUN via I2C
 //	Return 16-bit value if OK, -10 on error
@@ -1270,6 +1269,40 @@ void uwfd64::SoftTrigger(int freq)
 		tmp |=  (freq * TRIG_CSR_SOFT) & TRIG_CSR_SOFT_MASK;
 		a32->trig.csr = tmp;
 	}
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Do ADC data receive test similar to one dane during phase adjustment
+int uwfd64::TestADCPhase(int cnt)
+{
+	int i, j, k, errcnt, irc, adc;
+	errcnt = 0;
+	// program ADC itself to produce 000111 data pattern
+	for (i=0; i<16; i++) {
+		adc = ICX_SLAVE_STEP * (i >> 2) + ICX_SLAVE_ADC + ICX_SLAVE_ADC_STEP * (i & 3);
+		// 0xE380 = b111000111000(0000), same as frame in bytewise 1xFrame mode, MSbits are transmitted
+		if (ADCWrite(i, ADC_REG_PAT1L, 0x80)) return -3;		 
+		if (ADCWrite(i, ADC_REG_PAT1H, 0xE3)) return -3;		 
+		if (ADCWrite(i, ADC_REG_TEST, ADC_TEST_USER)) return -3;		 
+	}
+
+	for (j=0; j<cnt; j++) {
+		// seq instability measurement
+		if (irc = ADCCheckSeq(2)) return irc;
+		// read counters and increment IODELAY
+		for (i=0; i<16; i++) {
+			adc = ICX_SLAVE_STEP * (i >> 2) + ICX_SLAVE_ADC + ICX_SLAVE_ADC_STEP * (i & 3);
+			for (k=0; k<9; k++) {			
+				irc = ICXRead(adc + ICX_SLAVE_ADC_CINS + k);
+				printf("%c", (irc) ? '*' : '.');
+				if (irc) errcnt++;
+			}
+			printf(" ");
+			// increment IODELAY for all bits and frame
+		}
+		printf("\n");
+	}
+	return errcnt;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -672,6 +672,7 @@ public:
 	inline void ResetTrigCnt(void) { a32->trig.gtime = 0; };
 	void SoftTrigger(int freq);
 	int TestAllChannels(int cnt);
+	int TestADCPhase(int cnt);
 	int TestADCReg(int cnt);
 	int TestFifo(int cnt);
 	int TestRandomRead(int cnt);

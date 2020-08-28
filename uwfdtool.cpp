@@ -388,6 +388,9 @@ int uwfd64_tool::DoTest(uwfd64 *ptr, int type, int cnt)
 	case 8:
 		irc = ptr->TestAllChannels(cnt);
 		break;	
+	case 9:
+		irc = ptr->TestADCPhase(cnt);
+		break;
 	default:
 		irc = -10;
 		break;
@@ -1060,7 +1063,8 @@ void Help(void)
 	printf("\t5 - configure and read back slave clock controller SiLabs Si5338;\n");
 	printf("\t6 - get blocks to fifo and check format (length and CW);\n");
 	printf("\t7 - fill the 1st Mbyte with random numbers and do random address reads;\n");
-	printf("\t8 - check all channels by applying various DAC settings (amplification, noise, slope).\n");
+	printf("\t8 - check all channels by applying various DAC settings (amplification, noise, slope);\n");
+	printf("\t9 - receive data from ADC - check stability.\n");
 	printf("U num|* addr [data] - read/write 16-bit word to clock CDCUN1208LP chip using I2C;\n");
 	printf("V num|* [nadc] - scan and adjust input data delays for module num adc nadc or all adc's if omitted\n");
 	printf("W ms - wait ms milliseconds.\n");

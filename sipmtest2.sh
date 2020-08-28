@@ -2,7 +2,7 @@
 #	unit number
 UNIT=${1-0}
 SIZE=50
-DATADIR=/mnt/data1/tests
+DATADIR=data
 D=`date +%F`
 DD=$DATADIR/$D
 
@@ -17,9 +17,9 @@ fi
 
 F=$DD/sipmcosm-m$UNIT
 echo "Starting at `date`"
-uwfdtool "p ${UNIT} main.bin;w 2000;i ${UNIT} cosmtrig-sipm.conf;m ${UNIT} 0;n ${UNIT} ${SIZE} ${F}.dat"
+./uwfdtool "p ${UNIT} main.bin;w 2000;i ${UNIT} cosmtrig-sipm.conf;m ${UNIT} 0;n ${UNIT} ${SIZE} ${F}.dat"
 echo "Data taken at `date`"
-dat2root2 ${F}.dat ${F}.root
+./dat2root2 ${F}.dat ${F}.root
 root -l -b -q "sipmtest2.C(\"$F\")"
 evince ${F}.pdf 2>> /dev/null &
 echo "Finished at `date`"
