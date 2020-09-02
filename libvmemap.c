@@ -155,7 +155,6 @@ int vmemap_a64_blkread(
 	return 0;
 }
 
-
 /* Write block A64D32. Return 0 if OK, negative number on error */
 int vmemap_a64_blkwrite(
 	unsigned int unit, 		// Tundra master window.
@@ -183,6 +182,28 @@ int vmemap_a64_dma(
 	struct vme_dma_op dma;
 
 	dma.aspace = VME_A64;
+	dma.cycle = VME_USER | VME_DATA | VME_BLT;
+	dma.dwidth = VME_D32;
+	dma.vme_addr = vme_addr;
+	dma.buf_vaddr = (unsigned long) data;
+	dma.count = len;
+	dma.dir = rw ? VME_DMA_MEM_TO_VME : VME_DMA_VME_TO_MEM;
+//	printf("vma_addr = %LX   user_addr = %LX   len = %X\n", dma.vme_addr, dma.buf_vaddr, dma.count);
+	if (ioctl(fd, VME_DMA_OP, &dma) != len) return -1;
+	return 0;
+}
+
+/* Read/Write block A32D32 using DMA & BLT. Return 0 if OK, -1 on error */
+int vmemap_a32_dma(
+	int fd,				// DMA file 
+	unsigned long vme_addr, 	// VME address
+	unsigned int *data,		// buffer for data
+	int len,			// length in bytes
+	int rw				// rw = 0 - read, rw = 1 - write
+) {
+	struct vme_dma_op dma;
+
+	dma.aspace = VME_A32;
 	dma.cycle = VME_USER | VME_DATA | VME_BLT;
 	dma.dwidth = VME_D32;
 	dma.vme_addr = vme_addr;

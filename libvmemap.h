@@ -78,6 +78,15 @@ int vmemap_a64_dma(
 	int rw				// rw = 0 - read, rw = 1 - write
 );
 
+/* Read/write block A32D32 using DMA & BLT. Return 0 if OK, -1 on error */
+int vmemap_a32_dma(
+	int fd,				// DMA file 
+	unsigned long vme_addr, 	// VME address
+	unsigned int *data,		// buffer for data
+	int len,			// length in bytes
+	int rw				// rw = 0 - read, rw = 1 - write
+);
+
 /* Sleep number of usec using nanosleep */
 void vmemap_usleep(
 	int usec

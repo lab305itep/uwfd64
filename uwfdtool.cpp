@@ -591,12 +591,12 @@ void uwfd64_tool::List(void)
 	int i, j;
 	printf("%d modules found:\n", N);
 	if (N) {
-		printf("No Serial  GA A16  A32      A64              Version  S0   S1   S2   S3   Done\n");
+		printf("No Serial  GA A16  A32      A64              Blk Version  S0   S1   S2   S3   Done\n");
 		for (i=0; i<N; i++) {
 			j = array[i]->GetVersion();
-			printf("%2d %3d:%3d %2d %4.4X %8.8X %16.16LX %8.8X:%4.4X:%4.4X:%4.4X:%4.4X %3s\n", 
+			printf("%2d %3d:%3d %2d %4.4X %8.8X %16.16LX %3d %8.8X:%4.4X:%4.4X:%4.4X:%4.4X %3s\n", 
 				i + 1, array[i]->GetBatch(), array[i]->GetSerial(), array[i]->GetGA(), 
-				array[i]->GetBase16(), array[i]->GetBase32(), array[i]->GetBase64(), 
+				array[i]->GetBase16(), array[i]->GetBase32(), array[i]->GetBase64(), array[i]->Conf.blk_transp,
 				j, (j == -1) ? 0xFFFF : array[i]->GetSlaveVersion(0), (j == -1) ? 0xFFFF : array[i]->GetSlaveVersion(1), 
 				(j == -1) ? 0xFFFF : array[i]->GetSlaveVersion(2), (j == -1) ? 0xFFFF : array[i]->GetSlaveVersion(3), array[i]->IsDone() ? "Yes" : "No ");
 			if (j == -1) continue;

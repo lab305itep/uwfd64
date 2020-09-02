@@ -303,6 +303,8 @@ struct uwfd64_a32_reg {
 	struct uwfd64_i2c_reg i2c;	// I2C master clock control (TI CDCUN1208LP)
 };
 
+#define UWFD64_A32_FIFO	0x8000		// shift to FIFO access to SDRAM in A32 address space
+
 //	CDCUN1208LP definitions
 #define CDCUN_ADDR              0x50
 //	Output control registers
@@ -583,7 +585,16 @@ struct uwfd64_a32_reg {
 #define SI5338_TIMEOUT		100
 
 //************************************************************************************************************************************************************************//
+//	Only supported so far transports here
+enum UWFD64_BLK_TRANSPORT {
+	UWFD64_BLK_AUTO = -1,		// block transport auto select trying controller and firmware
+	UWFD64_BLK_A64_BLT = 0,		// block transfere in A64 address space, DMA, 32 bit data
+	UWFD64_BLK_A64_MAP = 1,		// A64 mapped, no DMA, 32-bit data
+	UWFD64_BLK_A32_BLT = 100	// block transfere in A32 address space, DMA, 32 bit data
+};
+
 struct uwfd64_module_config {
+	enum UWFD64_BLK_TRANSPORT blk_transp;	// transport for block operations
 	int MasterClockMux;	// master clock multiplexer setting 
 	int MasterTrigMux;	// master trigger multiplexer setting 
 	int MasterInhMux;	// master inhibit multiplexer setting
@@ -631,6 +642,7 @@ private:
 	struct uwfd64_a16_reg *a16;
 	struct uwfd64_a32_reg *a32;
 	int dma_fd;
+	
 	struct uwfd64_module_config Conf;
 public:
 	uwfd64(int sernum, int gnum, unsigned short *space_a16, unsigned int *space_a32, int fd, config_t *cnf = NULL);
@@ -638,6 +650,7 @@ public:
 	int ADCWrite(int num, int addr, int val);
 	int ADCCheckSeq(int time, int xilmask);
 	int ADCAdjust(int adcmask);
+	int BlockTransfer(unsigned int fifo_addr, unsigned int *data, int len, int wr);
 	int ConfigureMasterClock(int sel, int div, int erc = 0);
 	int ConfigureSlaveClock(int num, const char *fname);
 	int ConfigureSlaveXilinx(int num);

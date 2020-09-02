@@ -19,6 +19,7 @@
 uwfd64::uwfd64(int sernum, int gnum, unsigned short *space_a16, unsigned int *space_a32, int fd, config_t *cnf)
 {
 	int s, i;
+	unsigned int buf;
 
 	serial = sernum;
 	ga = gnum;
@@ -34,6 +35,11 @@ uwfd64::uwfd64(int sernum, int gnum, unsigned short *space_a16, unsigned int *sp
 	for (i=0; i<5; i++) if (ga & (1 << i)) s++;
 	s = 1 - (s & 1);
 	a16->c2x = (CPLD_C2X_RESET + ga * CPLD_C2X_GA + s * CPLD_C2X_PARITY) << 8;
+	// Determine block transport for auto
+	if (Conf.blk_transp == UWFD64_BLK_AUTO) {
+		i = vmemap_a64_blkread(A64UNIT, 0, &buf, sizeof(buf));	// try to read A64
+		Conf.blk_transp = (i) ? UWFD64_BLK_A32_BLT : UWFD64_BLK_A64_BLT;
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -288,6 +294,35 @@ int uwfd64::ADCAdjust(int adcmask = 0xFFFF)
 		if (ADCWrite(i, ADC_REG_TEST, 0)) return -3;
 	}
 	return 0;
+}
+
+int uwfd64::BlockTransfer(unsigned int fifo_addr, unsigned int *data, int len, int wr)
+{
+	int irc;
+	int adr, ln, done;
+	
+	if (!len) return 0;	// nothing to do
+	switch (Conf.blk_transp) {
+	case UWFD64_BLK_A64_BLT:
+		irc = vmemap_a64_dma(dma_fd, GetBase64() + fifo_addr, data, len, wr);
+		break;
+	case UWFD64_BLK_A64_MAP:
+		irc = (wr) ? vmemap_a64_blkwrite(A64UNIT, GetBase64() + fifo_addr, data, len) : vmemap_a64_blkread(A64UNIT, GetBase64() + fifo_addr, data, len);
+		break;
+	case UWFD64_BLK_A32_BLT:
+		ln = 0;
+		a32->fifo.wptr = fifo_addr;
+		for (done = 0; done < len; done += ln) {
+			ln = len - done;
+			if (ln > 0x8000) ln = 0x8000;
+			irc = vmemap_a32_dma(dma_fd, GetBase32() + UWFD64_A32_FIFO, data + done / sizeof(int), ln, wr);
+			if (irc != 0) break;
+		}
+		break;
+	default:
+		irc = -1;
+	}
+	return irc;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -584,7 +619,7 @@ int uwfd64::GetFromFifo(void *buf, int size)
 	if (len > size) len = size;
 	if (rptr + len > fifotop) len = fifotop - rptr;
 
-	if (vmemap_a64_dma(dma_fd, GetBase64() + rptr, (unsigned int *)buf, len, 0)) return -2;
+	if (BlockTransfer(rptr, (unsigned int *)buf, len, 0)) return -2;
 	rptr += len;
 	if (rptr == fifotop) rptr = fifobot;
 	a32->fifo.rptr = rptr;
@@ -1037,6 +1072,11 @@ void uwfd64::ReadConfig(config_t *cnf)
 			sprintf(sect, "Dev%3.3d", GetSerial());
 		} else {
 			strcpy(sect, "Def");
+		}
+//	int blk_transport
+		sprintf(str, "%s.BlkTransport", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			Conf.blk_transp = (enum UWFD64_BLK_TRANSPORT) tmp;
 		}
 //	int MasterClockMux;	// master clock multiplexer setting 
 		sprintf(str, "%s.MasterClockMux", sect);
@@ -1587,7 +1627,7 @@ int uwfd64::TestAllChannels(int cnt)
 	len = a32->fifo.wptr - fifobot;		// we never wrap
 	if (len > MBYTE) len = MBYTE;		// just for sure
 	// read data		
-	if (vmemap_a64_dma(dma_fd, GetBase64() + fifobot, (unsigned int *)buf, len, 0)) {
+	if (BlockTransfer(fifobot, (unsigned int *)buf, len, 0)) {
 		free(buf);
 		return -4;
 	}
@@ -1635,7 +1675,7 @@ int uwfd64::TestAllChannels(int cnt)
 	len = a32->fifo.wptr - fifobot;		// we never wrap
 	if (len > MBYTE) len = MBYTE;		// just for sure
 	// read data		
-	if (vmemap_a64_dma(dma_fd, GetBase64() + fifobot, (unsigned int *)buf, len, 0)) {
+	if (BlockTransfer(fifobot, (unsigned int *)buf, len, 0)) {
 		free(buf);
 		return -4;
 	}
@@ -1671,8 +1711,6 @@ int uwfd64::TestAllChannels(int cnt)
 	return errcnt;
 
 }
-
-
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //	Get data via FIFO. Check block format
@@ -1726,8 +1764,7 @@ int uwfd64::TestFifo(int cnt)
 		if (len > MBYTE) len = MBYTE;
 		if (raddr + len > fifotop) len = fifotop - raddr;
 //		printf("waddr = %X, raddr = %X, len = %X waddr-raddr = %X\n", waddr, raddr, len, waddr - raddr);
-		if (vmemap_a64_dma(dma_fd, GetBase64() + raddr, (unsigned int *)buf, len, 0)) {
-//		if (vmemap_a64_blkread(A64UNIT, GetBase64() + raddr, (unsigned int *)buf, len)) {
+		if (BlockTransfer(raddr, (unsigned int *)buf, len, 0)) {
 			free(buf);
 			a32->fifo.csr = 0x90000000;	// en debug
 			printf("dma read error:%m  debug = %8.8X\n", a32->fifo.csr);
@@ -1764,7 +1801,7 @@ int uwfd64::TestFifo(int cnt)
 			}
 			if (k & 0xF) printf("\n\n");
 			// reread and print the same block
-			if (vmemap_a64_blkread(A64UNIT, GetBase64() + raddr, (unsigned int *)buf, len)) {
+			if (BlockTransfer(raddr, (unsigned int *)buf, len, 0)) {
 				free(buf);
 				return -4;
 			}
@@ -1794,38 +1831,29 @@ int uwfd64::TestRandomRead(int cnt)
 	int errcnt;
 	int i, m;
 	unsigned int *buf;
-	unsigned int *ptr;
 	unsigned int val;
-	unsigned long long vme_addr;
 	
 	buf = (unsigned int *) malloc(MBYTE);
 	if (!buf) return -1;
 	errcnt = 0;	
 	srand48(time(NULL));
-	vme_addr = GetBase64();
 	// Fill
 	for(m = 0; m < MBYTE / sizeof(int); m++) buf[m] = mrand48();
-	irc = vmemap_a64_dma(dma_fd, vme_addr, buf, MBYTE, 1);
+	irc = BlockTransfer(0, buf, MBYTE, 1);
 	if (irc) {
 		free(buf);
 		return -2;
 	}
 	// Test
-	ptr = vmemap_open(A64UNIT, vme_addr, MBYTE, VME_A64, VME_USER | VME_DATA, VME_D32);
-	if (!ptr) {
-		free(buf);
-		return -3;
-	}
 	for (m = 0; m < cnt; m++) {
 		i = mrand48() & (MBYTE / sizeof(int) - 1);
-		val = ptr[i];
+		irc = BlockTransfer(i * sizeof(int), &val, sizeof(int), 0);
 		if (val != buf[i]) {
 			if (errcnt < 100) Log(DEBUG, "%8.8X: %8.8X (write) != %8.8X (read)\n", 
 				i * sizeof(int), buf[i], val);
 			errcnt++;
 		}
 	}
-	vmemap_close(ptr);
 	free(buf);
 	return errcnt;
 }
@@ -1873,10 +1901,10 @@ int uwfd64::TestSDRAM(int cnt)
 		seed = time(NULL);
 		// writing
 		srand48(seed);
-		vme_addr = GetBase64();
+		vme_addr = 0;
 		for (k = 0; k < j; k++) {
 			for(m = 0; m < MBYTE / sizeof(int); m++) buf[m] = mrand48();
-			irc = vmemap_a64_dma(dma_fd, vme_addr, buf, MBYTE, 1);
+			irc = BlockTransfer(vme_addr, buf, MBYTE, 1);
 //			printf("Writing: i=%d j=%d k=%d irc=%d\n", i, j, k, irc);
 			if (irc) {
 				free(buf);
@@ -1887,11 +1915,9 @@ int uwfd64::TestSDRAM(int cnt)
 		}
 		// reading
 		srand48(seed);
-		vme_addr = GetBase64();
+		vme_addr = 0;
 		for (k = 0; k < j; k++) {
-			irc = vmemap_a64_dma(dma_fd, vme_addr, buf, MBYTE, 0);
-//			irc = vmemap_a64_blkread(A64UNIT, vme_addr, buf, MBYTE);
-//			printf("Reading: i=%d j=%d k=%d irc=%d\n", i, j, k, irc);
+			irc = BlockTransfer(vme_addr, buf, MBYTE, 0);
 			if (irc) {
 				free(buf);
 				Log(ERROR, "VME DMA read error %m\n");
@@ -1908,15 +1934,15 @@ int uwfd64::TestSDRAM(int cnt)
 						k * MBYTE + m * sizeof(int), val, buf[m]);
 				}
 			}
-			if (flag && fcnt < 100) {
-				for(m = 0; m < MBYTE / sizeof(int); m++) {
-					if ((m & 7) == 0) Log(DEBUG, "%8.8X: ", k * MBYTE + m * sizeof(int));
-					Log(DEBUG, "%8.8X ", buf[m]);
-					if ((m & 7) == 7) Log(DEBUG, "\n");
-				}
-				if (m & 7) Log(DEBUG, "\n");
+//			if (flag && fcnt < 100) {
+//				for(m = 0; m < MBYTE / sizeof(int); m++) {
+//					if ((m & 7) == 0) Log(DEBUG, "%8.8X: ", k * MBYTE + m * sizeof(int));
+//					Log(DEBUG, "%8.8X ", buf[m]);
+//					if ((m & 7) == 7) Log(DEBUG, "\n");
+//				}
+//				if (m & 7) Log(DEBUG, "\n");
 //				goto fin;
-			}
+//			}
 			vme_addr += MBYTE;
 		}
 	}
