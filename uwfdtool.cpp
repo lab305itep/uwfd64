@@ -82,6 +82,7 @@ public:
 	void List(void);
 	void Prog(int serial = -1, char *fname = NULL);
 	void ReadConfig(char *fname);
+	void ResetFIFO(int serial, int what);
 	inline void SetStatus(void) { Status = 1;};
 	void SoftTrigger(int serial, int freq);
 	void Test(int serial = -1, int type = 0, int cnt = 1000000);
@@ -92,7 +93,7 @@ public:
 
 uwfd64_tool::uwfd64_tool(const char *ini_file_name)
 {
-	uwfd64 *ptr;	
+	uwfd64 *ptr;
 	config_t cnf;
 	config_t *pcnf;
 	config_setting_t *cptr;
@@ -102,9 +103,12 @@ uwfd64_tool::uwfd64_tool(const char *ini_file_name)
 	Status = 0;
 
 	a16 = (unsigned short *) vmemap_open(A16UNIT, A16BASE, 0x100 * A16STEP, VME_A16, VME_USER | VME_DATA, VME_D16);
-	a32 = vmemap_open(A32UNIT, A32BASE, 0x100 * A32STEP, VME_A32, VME_USER | VME_DATA, VME_D32);
+	a32 = vmemap_open(A32UNIT, A32BASE, 32 * A32STEP, VME_A32, VME_USER | VME_DATA, VME_D32);
 	dma_fd = vmedma_open();
-	if (!IsOK()) return;
+	if (!IsOK()) {
+		printf("VME open: a16 = %p    a32 = %p    dma = %d\n", a16, a32, dma_fd);
+		return;
+	}
 	
 	if (ini_file_name) {
 		pcnf = &cnf;
@@ -129,6 +133,7 @@ uwfd64_tool::uwfd64_tool(const char *ini_file_name)
 			continue;
 		}
 		array[N] = ptr;
+//		printf("%d: %X\n", N, ptr->a16->c2x);
 		N++;
 	}
 }
@@ -660,6 +665,30 @@ void uwfd64_tool::ReadConfig(char *fname)
 	ClearStatus();
 }
 
+void uwfd64_tool::ResetFIFO(int serial, int what)
+{
+	int i;
+	uwfd64 *ptr;
+	if (serial < 0) {
+		for (i=0; i<N; i++) {
+			array[i]->EnableFifo(0);	// clear FIFO
+			array[i]->ResetFifo((what) ? FIFO_CSR_HRESET: FIFO_CSR_SRESET);
+			array[i]->EnableFifo(1);	// enable FIFO
+		}
+	} else {
+		ptr = FindSerial(serial);
+		if (ptr == NULL) {
+			printf("Module %d not found.\n", serial);
+			return;
+		}
+		ptr->EnableFifo(0);	// clear FIFO
+		ptr->ResetFifo((what) ? FIFO_CSR_HRESET: FIFO_CSR_SRESET);
+		ptr->EnableFifo(1);	// enable FIFO
+	}
+	ClearStatus();
+}
+
+
 void uwfd64_tool::SoftTrigger(int serial, int freq)
 {
 	int i;
@@ -840,7 +869,7 @@ void uwfd64_tool::WriteNFile(int serial, char *fname, int size, int flag)
 	fflush(stdout);
 	StopFlag = 0;
 	ClearStatus();
-	if (flag == 'P') fptr->Inhibit(1);
+	if (flag == 'P' && fptr != NULL) fptr->Inhibit(1);
 	for (j = 0; j < N; j++) if (active[j]) {
 		ptr = array[j];
 		ptr->EnableFifo(0);	// clear FIFO
@@ -860,7 +889,7 @@ void uwfd64_tool::WriteNFile(int serial, char *fname, int size, int flag)
 	for (i=0; (i < S || size <= 0) && (!StopFlag); i += irc) {
 		if (CheckCmd() && fgets(cmd, sizeof(cmd), stdin)) {
 			if (!isatty(STDIN_FILENO)) {
-				printf(cmd);
+				printf("%s", cmd);
 				fflush(stdout);
 			}
 			if (Process(cmd, this)) break;
@@ -1050,6 +1079,7 @@ void Help(void)
 	printf("L - List modules found;\n");
 	printf("M num|* 0|1 - clear/set inhibit;\n");
 	printf("N num size fname - get size Mbytes of data to file fname;\n");
+	printf("O num|* [0|1] - reset FIFO soft/hard;\n");
 	printf("P num|* [filename.bin] - Program. Use filename.bin or just pulse prog pin;\n");
 	printf("Q - Quit;\n");
 	printf("R num|* adc addr [data] - read/write ADC Registers;\n");
@@ -1296,10 +1326,23 @@ int Process(char *cmd, uwfd64_tool *tool)
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {
 			printf("Need filename.\n");
-	    		Help();
-	    		break;
+			Help();
+			break;
 		}
 		tool->WriteFile(serial, tok, ival);
+		break;
+	case 'O':
+		tool->SetStatus();
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need module serial number or *.\n");
+			Help();
+			break;
+		}
+		serial = (tok[0] == '*') ? -1 : strtol(tok, NULL, 0);
+		tok = strtok(NULL, DELIM);
+		ival = (tok) ? strtol(tok, NULL, 0) : 0;
+		tool->ResetFIFO(serial, ival);
 		break;
 	case 'P':	// Prog
 	    	tool->SetStatus();

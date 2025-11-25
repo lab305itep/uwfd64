@@ -202,6 +202,7 @@ int vmemap_a32_dma(
 	int rw				// rw = 0 - read, rw = 1 - write
 ) {
 	struct vme_dma_op dma;
+	int irc;
 
 	dma.aspace = VME_A32;
 	dma.cycle = VME_USER | VME_DATA | VME_BLT;
@@ -210,8 +211,10 @@ int vmemap_a32_dma(
 	dma.buf_vaddr = (unsigned long) data;
 	dma.count = len;
 	dma.dir = rw ? VME_DMA_MEM_TO_VME : VME_DMA_VME_TO_MEM;
-//	printf("vma_addr = %LX   user_addr = %LX   len = %X\n", dma.vme_addr, dma.buf_vaddr, dma.count);
-	if (ioctl(fd, VME_DMA_OP, &dma) != len) return -1;
+	printf("vma_addr = %LX   user_addr = %LX   len = %X  rw = %d\n", dma.vme_addr, dma.buf_vaddr, dma.count, rw);
+	irc = ioctl(fd, VME_DMA_OP, &dma);
+	printf("irc = %d\n", irc);
+	if (irc != len) return -1;
 	return 0;
 }
 

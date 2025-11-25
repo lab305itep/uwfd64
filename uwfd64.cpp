@@ -31,10 +31,12 @@ uwfd64::uwfd64(int sernum, int gnum, unsigned short *space_a16, unsigned int *sp
 	Conf.FifoEnd = 1;	// minimum FIFO size of 8kBytes
 	if (cnf) ReadConfig(cnf);
 	// Set base address for A32 - emulate geographic and its parity
-	s = 0;
-	for (i=0; i<5; i++) if (ga & (1 << i)) s++;
-	s = 1 - (s & 1);
-	a16->c2x = (CPLD_C2X_RESET + ga * CPLD_C2X_GA + s * CPLD_C2X_PARITY) << 8;
+	if (IsHere()) {
+		s = 0;
+		for (i=0; i<5; i++) if (ga & (1 << i)) s++;
+		s = 1 - (s & 1);
+		a16->c2x = (CPLD_C2X_RESET + ga * CPLD_C2X_GA + s * CPLD_C2X_PARITY) << 8;
+	}
 	// Determine block transport for auto
 	if (Conf.blk_transp == UWFD64_BLK_AUTO) {
 		i = vmemap_a64_blkread(A64UNIT, 0, &buf, sizeof(buf));	// try to read A64
@@ -301,7 +303,8 @@ int uwfd64::BlockTransfer(unsigned int fifo_addr, unsigned int *data, int len, i
 	int irc;
 	int adr, ln, done;
 	
-	if (!len) return 0;	// nothing to do
+	irc = 0;
+	if (!len) return irc;	// nothing to do
 	switch (Conf.blk_transp) {
 	case UWFD64_BLK_A64_BLT:
 		irc = vmemap_a64_dma(dma_fd, GetBase64() + fifo_addr, data, len, wr);
@@ -314,9 +317,18 @@ int uwfd64::BlockTransfer(unsigned int fifo_addr, unsigned int *data, int len, i
 		a32->fifo.wptr = fifo_addr;
 		for (done = 0; done < len; done += ln) {
 			ln = len - done;
-			if (ln > 0x8000) ln = 0x8000;
+			if (ln > UWFD64_A32_FIFO_WIN) ln = UWFD64_A32_FIFO_WIN;
 			irc = vmemap_a32_dma(dma_fd, GetBase32() + UWFD64_A32_FIFO, data + done / sizeof(int), ln, wr);
+//			printf("DMA irc = %d\n", irc);
 			if (irc != 0) break;
+		}
+		break;
+	case UWFD64_BLK_A32_MAP:
+		a32->fifo.wptr = fifo_addr;
+		if (wr) {
+			for (done = 0; done < len / sizeof(int); done++) ((unsigned int *)a32)[UWFD64_A32_FIFO / sizeof(int)] = data[done];
+		} else {
+			for (done = 0; done < len / sizeof(int); done++) data[done] = ((unsigned int *)a32)[UWFD64_A32_FIFO / sizeof(int)];
 		}
 		break;
 	default:
@@ -1059,7 +1071,7 @@ int uwfd64::Prog(char *fname)
 //	Get Def and module configuration data from config_t structure
 void uwfd64::ReadConfig(config_t *cnf)
 {
-    	long tmp;
+    	int tmp;
     	double dtmp;
     	char *stmp;
     	char str[1024];
@@ -1424,6 +1436,7 @@ int analyse(short *buf, int len, int ttype, int token, int blklen, double *slope
 			}
 			chn = (buf[j] >> 9) & 0x3F;
 			blktype = (buf[j+1] >> 12) & 7;
+//			printf("chn = %d, blktype = %d\n", chn, blktype);
 			if (ttype < 0) {		// only selftriggers
 				if (blktype != 0) {
 					printf("Wrong blktype=%d encountered for selftrigger test, channel %2.2X\n", blktype, chn);
@@ -1545,7 +1558,6 @@ int uwfd64::TestAllChannels(int cnt)
 
 	// set inhibit
 	Inhibit(1);
-
 	errcnt = 0;
 
 	// check pedestals at min, mid, max
@@ -1981,7 +1993,7 @@ void uwfd64::WriteUserWord(int num)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//	Reset trigger counter and token in riggen module
+//	Reset trigger counter and token in triggen module
 void uwfd64::ZeroTrigger(void)
 {
 	a32->trig.gtime = 0;

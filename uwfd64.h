@@ -304,6 +304,7 @@ struct uwfd64_a32_reg {
 };
 
 #define UWFD64_A32_FIFO	0x8000		// shift to FIFO access to SDRAM in A32 address space
+#define UWFD64_A32_FIFO_WIN	0x8000	// SDRAM FIFO window in A32 address space
 
 //	CDCUN1208LP definitions
 #define CDCUN_ADDR              0x50
@@ -590,7 +591,8 @@ enum UWFD64_BLK_TRANSPORT {
 	UWFD64_BLK_AUTO = -1,		// block transport auto select trying controller and firmware
 	UWFD64_BLK_A64_BLT = 0,		// block transfere in A64 address space, DMA, 32 bit data
 	UWFD64_BLK_A64_MAP = 1,		// A64 mapped, no DMA, 32-bit data
-	UWFD64_BLK_A32_BLT = 100	// block transfere in A32 address space, DMA, 32 bit data
+	UWFD64_BLK_A32_BLT = 100,	// block transfere in A32 address space, DMA, 32 bit data
+	UWFD64_BLK_A32_MAP = 101	// A32 mapped, no DMA, 32-bit data
 };
 
 struct uwfd64_module_config {
