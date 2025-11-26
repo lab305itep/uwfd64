@@ -293,6 +293,48 @@ struct uwfd64_fifo_reg {
 #define FIFO_CSR_HRESET 	0x40000000
 #define FIFO_CSR_ENABLE 	0x80000000
 
+//	Ethernet controller:
+//      Address map:
+// 0    CSR
+// 4    MDIO
+// 8    received block counter
+// 12   error counter
+// 16   MAC[31:0]
+// 20   MAC[47:32]
+// 24   IP
+// 28   transmit block counter
+//      CSR bits:
+// 31   - enable PHY (clear reset)
+// 13:0 - MAC status bits (debugging, read only)
+//      MDIO bits:
+// 31   - busy (read only)
+// 30   - reset MDIO
+// 22:21 - operation: 0 - none, 1 - write, 2 - read, 3 - reserved
+// 20:16 - register address
+// 15:0 - data (read/write)
+
+struct uwfd64_eth_reg {
+	volatile unsigned int csr;
+	volatile unsigned int mdio;
+	volatile unsigned int rxcnt;
+	volatile unsigned int errcnt;
+	volatile unsigned int machigh;
+	volatile unsigned int maclow;
+	volatile unsigned int ip;
+	volatile unsigned int txcnt;
+};
+
+#define ETH_CSR_ENABLE		0x80000000
+#define ETH_MDIO_BUSY		0x80000000
+#define ETH_MDIO_RESET		0x40000000
+#define ETH_MDIO_WRITE		  0x400000
+#define ETH_MDIO_READ		  0x200000
+#define ETH_MDIO_REGMASK	  0x1F0000
+#define ETH_MDIO_DATAMASK	    0xFFFF
+#define ETH_MAC_MACMASK		0xFFFF0000
+#define ETH_MAC_PORTMASK	    0xFFFF
+
+
 struct uwfd64_a32_reg {
 	struct uwfd64_csr_reg csr;	// CSR
 	struct uwfd64_inout_reg ver;	// Version & test register
@@ -301,6 +343,7 @@ struct uwfd64_a32_reg {
 	struct uwfd64_spi_reg icx;	// inter Xilinx communication
 	struct uwfd64_spi_reg dac;	// comon level DAC
 	struct uwfd64_i2c_reg i2c;	// I2C master clock control (TI CDCUN1208LP)
+	struct uwfd64_eth_reg eth;	// Ethernet controller
 };
 
 #define UWFD64_A32_FIFO	0x8000		// shift to FIFO access to SDRAM in A32 address space
@@ -632,6 +675,9 @@ struct uwfd64_module_config {
 	short int TrigSumMask[4];	// Mask channels from trigger production sum
 	short int InvertMask[4];	// Mask channels for invertion
 	char SlaveClockFile[MAX_PATH_LEN];	// Si5338 .h configuration file
+	unsigned long long MAC;	// ethernet MAC address
+	unsigned int IP;	// ethernet IP address
+	unsigned short port;	// UDP port on the destination computer
 };
 
 //************************************************************************************************************************************************************************//
@@ -644,6 +690,8 @@ private:
 	struct uwfd64_a16_reg *a16;
 	struct uwfd64_a32_reg *a32;
 	int dma_fd;
+	unsigned long long str2MAC(const char *str);
+	unsigned str2IP(const char *str);
 	
 	struct uwfd64_module_config Conf;
 public:
@@ -656,6 +704,7 @@ public:
 	int ConfigureMasterClock(int sel, int div, int erc = 0);
 	int ConfigureSlaveClock(int num, const char *fname);
 	int ConfigureSlaveXilinx(int num);
+	int ConfigureUDP(int enable = 1);
 	void EnableFifo(int what);
 	int DACSet(int val);
 	int GetADCID(int num);
@@ -668,6 +717,8 @@ public:
 	inline int GetSerial(void) { return serial; };
 	inline int GetVersion(void) { return a32->ver.in; };
 	inline int GetSlaveVersion(int num) { return ICXRead(ICX_SLAVE_STEP * (num & 3) + ICX_SLAVE_VER_IN) & 0xFFFF; };
+	inline unsigned long long GetMAC(void) { return ((unsigned long long) a32->eth.machigh << 16) | (a32->eth.maclow >> 16); };
+	inline unsigned GetIP(void) { return a32->eth.ip; };
 	int I2CRead(int addr);
 	int I2CWrite(int addr, int val);
 	int ICXRead(int addr);
@@ -693,7 +744,9 @@ public:
 	int TestRandomRead(int cnt);
 	int TestReg32(int cnt);
 	int TestSDRAM(int cnt);
+	int TestSDRAMUDP(int cnt);
 	int TestSlaveReg16(int cnt);
+	int UDPBlockRead(unsigned int fifo_addr, unsigned int *data, int len);
 	void WriteUserWord(int num);
 	void ZeroTrigger(void);
 

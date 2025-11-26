@@ -563,6 +563,23 @@ int uwfd64::ConfigureSlaveXilinx(int num)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Configure MAC, IP and destination port and enable ethernet 
+//	Return 0 if OK, -10 on error, but no errors yet
+int uwfd64::ConfigureUDP(int enable)
+{
+	if (enable) {
+		a32->eth.machigh = (Conf.MAC >> 16) & 0xFFFFFFFF;
+		a32->eth.maclow = ((Conf.MAC & 0xFFFF) << 16) | Conf.port;
+		a32->eth.ip = Conf.IP;
+		a32->eth.csr = ETH_CSR_ENABLE;
+	} else {
+		a32->eth.csr = 0;
+	}
+	printf("ETH: %X %X\n", a32->eth.machigh, a32->eth.maclow);
+	return 0;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //	Write common offset DAC via SPI. No way to read.
 //	Return 0 if OK, -10 on timeout
 int uwfd64::DACSet(int val)
@@ -846,6 +863,11 @@ int uwfd64::Init(void)
 	    errcnt++;
 	}
 	for (i=0; i<4; i++) errcnt += ConfigureSlaveXilinx(i);
+	if (Conf.MAC != 0 && Conf.IP != 0 && GetVersion() >= 0x20005) {
+		ConfigureUDP(1);
+	} else {
+		ConfigureUDP(0);
+	}
 	return errcnt;
 }
 
@@ -1284,6 +1306,24 @@ void uwfd64::ReadConfig(config_t *cnf)
 		sprintf(str, "%s.InvertMask", sect);
 		ptr = config_lookup(cnf, str);
 		if (ptr) for (j=0; j<4; j++) Conf.InvertMask[j] = config_setting_get_int_elem(ptr, j);
+//	unsigned short port;		// Destination UDP port
+		sprintf(str, "%s.port", sect);
+		if (config_lookup_int(cnf, str, &tmp)) {
+			tmp &= 0xFFFF;
+			Conf.port = tmp;
+		}
+//	unsigned long long MAC;		// Our MAC address
+		sprintf(str, "%s.MAC", sect);
+		if (config_lookup_string(cnf, str, (const char **) &stmp)) {
+			Conf.MAC = str2MAC(stmp);
+			if (i == 0 && Conf.MAC != 0) Conf.MAC = (Conf.MAC & 0xFFFFFFFF0000LL) + serial;
+		}
+//	unsigned IP;			// Our IP address
+		sprintf(str, "%s.IP", sect);
+		if (config_lookup_string(cnf, str, (const char **) &stmp)) {
+			Conf.IP = str2IP(stmp);
+			if (i == 0 && Conf.IP != 0) Conf.IP += serial;
+		}
 	}
 }
 
@@ -1322,6 +1362,46 @@ void uwfd64::SoftTrigger(int freq)
 		a32->trig.csr = tmp;
 	}
 }
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Convert deciaml string like 192.168.10.23   to 32 bit unsigned (IP address)
+unsigned uwfd64::str2IP(const char *str)
+{
+	unsigned IP;
+	int i;
+	unsigned tmp;
+	const char *ptr;
+
+	IP = 0;
+	ptr = str;
+	for (i=0; i<4; i++) {
+		tmp = strtoul(ptr, NULL, 10);
+		IP += tmp << (8 * (3 - i));
+		ptr = strchr(ptr, '.');
+		if (!ptr || ptr[1] == '\0') break;
+		ptr++;
+	}
+	if (i < 3) return 0;
+	return IP;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Convert hex string like 12:13:14:AD:05:EE   to 48 bit unsigned (MAC address)
+unsigned long long uwfd64::str2MAC(const char *str)
+{
+	unsigned long long MAC;
+	int i;
+	unsigned long long tmp;
+
+	if (strlen(str) < 17) return 0;		// it must be at least 6*2+5 characters
+	MAC = 0;
+	for (i=0; i<6; i++) {
+		tmp = strtoul(&str[3*i], NULL, 16);
+		MAC += tmp << (8 * (5 - i));
+	}
+	return MAC;
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //	Do ADC data receive test similar to one dane during phase adjustment
@@ -1721,7 +1801,6 @@ int uwfd64::TestAllChannels(int cnt)
 	printf("\n");
 	free(buf);
 	return errcnt;
-
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1964,6 +2043,75 @@ int uwfd64::TestSDRAM(int cnt)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Write/read random number test of the SDRAM memory with UdP readout
+//	cnt - amount of memory in Mbytes to test
+//	Return number of errors. Negative number is returned on access error.
+int uwfd64::TestSDRAMUDP(int cnt)
+{
+	int irc;
+	int errcnt, fcnt;
+	int i, j, k, m;
+	int seed;
+	int flag;
+	unsigned int *buf;
+	unsigned int val;
+	unsigned vme_addr;
+	
+	if (GetVersion() < 0x20005) {
+		Log(ERROR, "UDP is not supported for this firmware version. Minimum 2.5 required\n");
+		return -1;
+	}
+	buf = (unsigned int *) malloc(MBYTE);
+	if (!buf) return -1;
+	errcnt = 0;
+	fcnt = 0;	
+	for (i = 0; i < cnt; i += j) {	// cycle over passes
+		j = cnt - i;
+		if (j > MEMSIZE/MBYTE) j = MEMSIZE/MBYTE;
+		seed = time(NULL);
+		// writing
+		srand48(seed);
+		vme_addr = 0;
+		for (k = 0; k < j; k++) {
+			for(m = 0; m < MBYTE / sizeof(int); m++) buf[m] = mrand48();
+			irc = BlockTransfer(vme_addr, buf, MBYTE, 1);
+//			printf("Writing: i=%d j=%d k=%d irc=%d\n", i, j, k, irc);
+			if (irc) {
+				free(buf);
+				Log(ERROR, "VME DMA write error %m\n");
+				return -2;
+			}
+			vme_addr += MBYTE;
+		}
+		// reading
+		srand48(seed);
+		vme_addr = 0;
+		for (k = 0; k < j; k++) {
+			irc = UDPBlockRead(vme_addr, buf, MBYTE);
+			if (irc) {
+				free(buf);
+				Log(ERROR, "UDP read error %m\n");
+				return -3;
+			}
+			flag = 0;
+			fcnt = errcnt;
+			for(m = 0; m < MBYTE / sizeof(int); m++) {
+				val = mrand48();
+				if (buf[m] != val) {
+					errcnt++;
+					flag = 1;
+					if (errcnt < 100) Log(DEBUG, "%8.8X: %8.8X (write) != %8.8X (read)\n", 
+						k * MBYTE + m * sizeof(int), val, buf[m]);
+				}
+			}
+			vme_addr += MBYTE;
+		}
+	}
+	free(buf);
+	return errcnt;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //	Write/read random number test of the dedicated test register in slave Xilinxes
 //	cnt - repeat counter
 //	Return number of errors
@@ -1979,6 +2127,13 @@ int uwfd64::TestSlaveReg16(int cnt)
 		if (w != r) errcnt++;
 	}
 	return errcnt;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Read block from SDRAM memory via UDP
+int uwfd64::UDPBlockRead(unsigned int fifo_addr, unsigned int *data, int len)
+{
+	return 0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -593,24 +593,28 @@ void uwfd64_tool::L2CWrite(int serial, int num, int addr, int val)
 
 void uwfd64_tool::List(void)
 {
-	int i, j;
+	int i, j, v;
 	printf("%d modules found:\n", N);
 	if (N) {
 		printf("No Serial  GA A16  A32      A64              Blk Version  S0   S1   S2   S3   Done\n");
 		for (i=0; i<N; i++) {
-			j = array[i]->GetVersion();
+			v = array[i]->GetVersion();
 			printf("%2d %3d:%3d %2d %4.4X %8.8X %16.16LX %3d %8.8X:%4.4X:%4.4X:%4.4X:%4.4X %3s\n", 
 				i + 1, array[i]->GetBatch(), array[i]->GetSerial(), array[i]->GetGA(), 
 				array[i]->GetBase16(), array[i]->GetBase32(), array[i]->GetBase64(), array[i]->Conf.blk_transp,
-				j, (j == -1) ? 0xFFFF : array[i]->GetSlaveVersion(0), (j == -1) ? 0xFFFF : array[i]->GetSlaveVersion(1), 
-				(j == -1) ? 0xFFFF : array[i]->GetSlaveVersion(2), (j == -1) ? 0xFFFF : array[i]->GetSlaveVersion(3), array[i]->IsDone() ? "Yes" : "No ");
-			if (j == -1) continue;
+				v, (v == -1) ? 0xFFFF : array[i]->GetSlaveVersion(0), (v == -1) ? 0xFFFF : array[i]->GetSlaveVersion(1), 
+				(v == -1) ? 0xFFFF : array[i]->GetSlaveVersion(2), (v == -1) ? 0xFFFF : array[i]->GetSlaveVersion(3), array[i]->IsDone() ? "Yes" : "No ");
+			if (v == -1) continue;
 			printf("ADC: ");
 			for (j=0; j<16; j++) printf("%4.4X ", array[i]->GetADCID(j));
 			printf("\nSi5338:");
 			for (j=0; j<4; j++) printf("%1.1X%2.2X%2.2X%2.2X%2.2X ", array[i]->L2CRead(j, 0),
 				array[i]->L2CRead(j, 2), array[i]->L2CRead(j, 3), array[i]->L2CRead(j, 4), array[i]->L2CRead(j, 5));
 			printf("\n");
+			if (v >= 0x20005) printf("MAC = %2.2LX:%2.2LX:%2.2LX:%2.2LX:%2.2LX:%2.2LX   IP = %d.%d.%d.%d\n",
+				(array[i]->GetMAC() >> 40) & 0xFF, (array[i]->GetMAC() >> 32) & 0xFF, (array[i]->GetMAC() >> 24) & 0xFF,
+				(array[i]->GetMAC() >> 16) & 0xFF, (array[i]->GetMAC() >> 8) & 0xFF, array[i]->GetMAC() & 0xFF,
+				(array[i]->GetIP() >> 24) & 0xFF, (array[i]->GetIP() >> 16) & 0xFF, (array[i]->GetIP() >> 8) & 0xFF, array[i]->GetIP() & 0xFF);
 		}
 	}
 }
