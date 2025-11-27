@@ -396,6 +396,8 @@ int uwfd64_tool::DoTest(uwfd64 *ptr, int type, int cnt)
 	case 9:
 		irc = ptr->TestADCPhase(cnt);
 		break;
+	case 10:
+		irc = ptr->TestSDRAMUDP(cnt);
 	default:
 		irc = -10;
 		break;
@@ -1099,6 +1101,7 @@ void Help(void)
 	printf("\t7 - fill the 1st Mbyte with random numbers and do random address reads;\n");
 	printf("\t8 - check all channels by applying various DAC settings (amplification, noise, slope);\n");
 	printf("\t9 - receive data from ADC - check stability.\n");
+	printf("\t10 - test SDRAM using UDP readout.\n");
 	printf("U num|* addr [data] - read/write 16-bit word to clock CDCUN1208LP chip using I2C;\n");
 	printf("V num|* [nadc] - scan and adjust input data delays for module num adc nadc or all adc's if omitted\n");
 	printf("W ms - wait ms milliseconds.\n");

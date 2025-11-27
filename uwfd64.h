@@ -690,10 +690,12 @@ private:
 	struct uwfd64_a16_reg *a16;
 	struct uwfd64_a32_reg *a32;
 	int dma_fd;
+	struct uwfd64_module_config Conf;
+
+	int AllocateUDPport(int port);
 	unsigned long long str2MAC(const char *str);
 	unsigned str2IP(const char *str);
-	
-	struct uwfd64_module_config Conf;
+	int SendUDPCommand(unsigned IP, int fifo_addr, int len);
 public:
 	uwfd64(int sernum, int gnum, unsigned short *space_a16, unsigned int *space_a32, int fd, config_t *cnf = NULL);
 	int ADCRead(int num, int addr);

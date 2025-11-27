@@ -5,12 +5,17 @@
 
 #define _FILE_OFFSET_BITS 64
 #include <ctype.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <math.h>
 #include <memory.h>
+#include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <time.h>
-#include <math.h>
+#include <unistd.h>
 #include "libvmemap.h"
 #include "log.h"
 #include "uwfd64.h"
@@ -298,6 +303,40 @@ int uwfd64::ADCAdjust(int adcmask = 0xFFFF)
 	return 0;
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Allocate udp port to listen all interfaces
+int uwfd64::AllocateUDPport(int port)
+{
+	int sock;
+	struct sockaddr_in address;
+	int flags;
+
+	/* Create the socket. */
+	sock = socket(PF_INET, SOCK_DGRAM, 0);
+	if (sock < 0) return sock;
+
+	/* Give the socket a name. */
+	address.sin_family = AF_INET;
+	address.sin_addr.s_addr = htonl(INADDR_ANY);
+	address.sin_port = htons(port);
+
+	if (bind(sock, (struct sockaddr *) &address, sizeof(address)) < 0) return -20;
+
+	flags = fcntl(sock, F_GETFL);
+	if (flags < 0) return flags;
+	flags |= O_NONBLOCK;
+	if (fcntl(sock, F_SETFL, flags) < 0) return -30;
+
+	return sock;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Do block transwer to/from fifo using configured transport
+//	fifo_addr - address in fifo
+//	data - data to be sent/received
+//	len - size of data in bytes
+//	wr - 0 (read), (1) write
+//	Return 0 on success
 int uwfd64::BlockTransfer(unsigned int fifo_addr, unsigned int *data, int len, int wr)
 {
 	int irc;
@@ -575,7 +614,6 @@ int uwfd64::ConfigureUDP(int enable)
 	} else {
 		a32->eth.csr = 0;
 	}
-	printf("ETH: %X %X\n", a32->eth.machigh, a32->eth.maclow);
 	return 0;
 }
 
@@ -1346,6 +1384,37 @@ void uwfd64::ResetFifo(int mask)
 };
 
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Send FIFO read command via UDP
+//	IP - module IP
+//	fifo_addr - absolute address in the memory
+//	len - data length in bytes
+//	Return 0 on success
+int uwfd64::SendUDPCommand(unsigned IP, int fifo_addr, int len)
+{
+	int sock;
+	struct sockaddr_in address;
+	int msg[3];
+	int irc;
+
+	/* Create the socket. */
+	sock = socket(PF_INET, SOCK_DGRAM, 0);
+	if (sock < 0) return sock;
+
+	/* Give the socket a name. */
+	address.sin_family = AF_INET;
+	address.sin_addr.s_addr = htonl(IP);
+	address.sin_port = htons(9000);
+
+	msg[0] = 1;	// the command
+	msg[1] = fifo_addr;
+	msg[2] = len;
+
+	irc = sendto(sock, msg, sizeof(msg), 0, (struct sockaddr *) &address, sizeof(address));
+
+	close(sock);
+	return irc;
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //	Set or pulse soft trigger
 //	freq > 0 - soft trigger period in ms
@@ -2133,6 +2202,71 @@ int uwfd64::TestSlaveReg16(int cnt)
 //	Read block from SDRAM memory via UDP
 int uwfd64::UDPBlockRead(unsigned int fifo_addr, unsigned int *data, int len)
 {
+	int iRcv;
+	int sock;
+	int buff[512];		// 2k is more than enough
+	int rcvcnt;
+	int timecnt;
+	int addr;
+	int ln;
+	int irc;
+
+	sock = AllocateUDPport(Conf.port);
+	if (sock < 0) {
+		Log(ERROR, "Can not allocate port %d: %m\n", Conf.port);
+		return iRcv;
+	}
+	irc = SendUDPCommand(Conf.IP, fifo_addr, len);
+	if (irc < 0) {
+		Log(ERROR, "Can not send read command to %d.%d.%d.%d via UDP: %m\n", 
+			(Conf.IP>>24) & 0xFF, (Conf.IP>>16) & 0xFF, (Conf.IP>>8) & 0xFF, Conf.IP & 0xFF);
+		return iRcv;
+	}
+	rcvcnt = 0;
+	timecnt = 0;
+
+	while (rcvcnt < len) {
+		irc = read(sock, buff, sizeof(buff));
+		if (irc >= 12) {
+			if (buff[0] & 0x80000000) {
+				Log(ERROR, "Error state signalled from the module\n");
+				close(sock);
+				return -50;
+			}
+			ln = buff[2];
+			if (ln != irc - 12) {
+				Log(ERROR, "Length mismatch received = %d while anounced %d\n", irc - 12, ln);
+				close(sock);
+				return -60;
+			}
+			addr = buff[1] - fifo_addr;
+			if (addr < 0 || addr + ln > len) {
+				Log(ERROR, "Address out of range: expected: %X-%X received: %X-%X\n",
+					fifo_addr, fifo_addr+len, buff[1], buff[1] + ln);
+				close(sock);
+				return -70;
+			}
+			memcpy((char *)data + addr, &buff[3], ln);
+			rcvcnt += ln;
+		} else if (irc > 0) {
+			Log(ERROR, "Strange block of length %d received\n", irc);
+			close(sock);
+			return -40;
+		} else if (errno == EAGAIN) {
+			timecnt++;
+			if (timecnt > 500) {	// should be enough
+				Log(ERROR, "UDP receive timeout\n");
+				close(sock);
+				return -20;
+			}
+			vmemap_usleep(1000);
+		} else {
+			Log(ERROR, "UDP receive error %m\n");
+			close(sock);
+			return -10;
+		}
+	}
+	close(sock);
 	return 0;
 }
 
@@ -2153,4 +2287,3 @@ void uwfd64::ZeroTrigger(void)
 {
 	a32->trig.gtime = 0;
 }
-
