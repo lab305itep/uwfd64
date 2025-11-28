@@ -1406,9 +1406,9 @@ int uwfd64::SendUDPCommand(unsigned IP, int fifo_addr, int len)
 	address.sin_addr.s_addr = htonl(IP);
 	address.sin_port = htons(9000);
 
-	msg[0] = 1;	// the command
-	msg[1] = fifo_addr;
-	msg[2] = len;
+	msg[0] = htonl(1);	// the command
+	msg[1] = htonl(fifo_addr);
+	msg[2] = htonl(len);
 
 	irc = sendto(sock, msg, sizeof(msg), 0, (struct sockaddr *) &address, sizeof(address));
 
@@ -2050,34 +2050,35 @@ int uwfd64::TestSDRAM(int cnt)
 	unsigned int *buf;
 	unsigned int val;
 	unsigned long long vme_addr;
+	const int chank = MBYTE;
 	
-	buf = (unsigned int *) malloc(MBYTE);
+	buf = (unsigned int *) malloc(chank);
 	if (!buf) return -1;
 	errcnt = 0;
 	fcnt = 0;	
 	for (i = 0; i < cnt; i += j) {	// cycle over passes
 		j = cnt - i;
-		if (j > MEMSIZE/MBYTE) j = MEMSIZE/MBYTE;
+		if (j > MEMSIZE/chank) j = MEMSIZE/chank;
 		seed = time(NULL);
 		// writing
 		srand48(seed);
 		vme_addr = 0;
 		for (k = 0; k < j; k++) {
-			for(m = 0; m < MBYTE / sizeof(int); m++) buf[m] = mrand48();
-			irc = BlockTransfer(vme_addr, buf, MBYTE, 1);
+			for(m = 0; m < chank / sizeof(int); m++) buf[m] = mrand48();
+			irc = BlockTransfer(vme_addr, buf, chank, 1);
 //			printf("Writing: i=%d j=%d k=%d irc=%d\n", i, j, k, irc);
 			if (irc) {
 				free(buf);
 				Log(ERROR, "VME DMA write error %m\n");
 				return -2;
 			}
-			vme_addr += MBYTE;
+			vme_addr += chank;
 		}
 		// reading
 		srand48(seed);
 		vme_addr = 0;
 		for (k = 0; k < j; k++) {
-			irc = BlockTransfer(vme_addr, buf, MBYTE, 0);
+			irc = BlockTransfer(vme_addr, buf, chank, 0);
 			if (irc) {
 				free(buf);
 				Log(ERROR, "VME DMA read error %m\n");
@@ -2085,25 +2086,16 @@ int uwfd64::TestSDRAM(int cnt)
 			}
 			flag = 0;
 			fcnt = errcnt;
-			for(m = 0; m < MBYTE / sizeof(int); m++) {
+			for(m = 0; m < chank / sizeof(int); m++) {
 				val = mrand48();
 				if (buf[m] != val) {
 					errcnt++;
 					flag = 1;
 					if (errcnt < 100) Log(DEBUG, "%8.8X: %8.8X (write) != %8.8X (read)\n", 
-						k * MBYTE + m * sizeof(int), val, buf[m]);
+						k * chank + m * sizeof(int), val, buf[m]);
 				}
 			}
-//			if (flag && fcnt < 100) {
-//				for(m = 0; m < MBYTE / sizeof(int); m++) {
-//					if ((m & 7) == 0) Log(DEBUG, "%8.8X: ", k * MBYTE + m * sizeof(int));
-//					Log(DEBUG, "%8.8X ", buf[m]);
-//					if ((m & 7) == 7) Log(DEBUG, "\n");
-//				}
-//				if (m & 7) Log(DEBUG, "\n");
-//				goto fin;
-//			}
-			vme_addr += MBYTE;
+			vme_addr += chank;
 		}
 	}
 //fin:
@@ -2125,55 +2117,55 @@ int uwfd64::TestSDRAMUDP(int cnt)
 	unsigned int *buf;
 	unsigned int val;
 	unsigned vme_addr;
+	const int chank = MBYTE/16;
 	
 	if (GetVersion() < 0x20005) {
 		Log(ERROR, "UDP is not supported for this firmware version. Minimum 2.5 required\n");
 		return -1;
 	}
-	buf = (unsigned int *) malloc(MBYTE);
+	buf = (unsigned int *) malloc(chank);
 	if (!buf) return -1;
 	errcnt = 0;
 	fcnt = 0;	
 	for (i = 0; i < cnt; i += j) {	// cycle over passes
 		j = cnt - i;
-		if (j > MEMSIZE/MBYTE) j = MEMSIZE/MBYTE;
+		if (j > MEMSIZE/chank) j = MEMSIZE/chank;
 		seed = time(NULL);
 		// writing
 		srand48(seed);
 		vme_addr = 0;
 		for (k = 0; k < j; k++) {
-			for(m = 0; m < MBYTE / sizeof(int); m++) buf[m] = mrand48();
-			irc = BlockTransfer(vme_addr, buf, MBYTE, 1);
+			for(m = 0; m < chank / sizeof(int); m++) buf[m] = mrand48();
+			irc = BlockTransfer(vme_addr, buf, chank, 1);
 //			printf("Writing: i=%d j=%d k=%d irc=%d\n", i, j, k, irc);
 			if (irc) {
 				free(buf);
-				Log(ERROR, "VME DMA write error %m\n");
+				Log(ERROR, "VME block write error %m\n");
 				return -2;
 			}
-			vme_addr += MBYTE;
+			vme_addr += chank;
 		}
 		// reading
 		srand48(seed);
 		vme_addr = 0;
 		for (k = 0; k < j; k++) {
-			irc = UDPBlockRead(vme_addr, buf, MBYTE);
+			irc = UDPBlockRead(vme_addr, buf, chank);
 			if (irc) {
 				free(buf);
-				Log(ERROR, "UDP read error %m\n");
 				return -3;
 			}
 			flag = 0;
 			fcnt = errcnt;
-			for(m = 0; m < MBYTE / sizeof(int); m++) {
+			for(m = 0; m < chank / sizeof(int); m++) {
 				val = mrand48();
-				if (buf[m] != val) {
+				if (ntohl(buf[m]) != val) {
 					errcnt++;
 					flag = 1;
 					if (errcnt < 100) Log(DEBUG, "%8.8X: %8.8X (write) != %8.8X (read)\n", 
-						k * MBYTE + m * sizeof(int), val, buf[m]);
+						k * chank + m * sizeof(int), val, buf[m]);
 				}
 			}
-			vme_addr += MBYTE;
+			vme_addr += chank;
 		}
 	}
 	free(buf);
@@ -2202,7 +2194,6 @@ int uwfd64::TestSlaveReg16(int cnt)
 //	Read block from SDRAM memory via UDP
 int uwfd64::UDPBlockRead(unsigned int fifo_addr, unsigned int *data, int len)
 {
-	int iRcv;
 	int sock;
 	int buff[512];		// 2k is more than enough
 	int rcvcnt;
@@ -2214,13 +2205,13 @@ int uwfd64::UDPBlockRead(unsigned int fifo_addr, unsigned int *data, int len)
 	sock = AllocateUDPport(Conf.port);
 	if (sock < 0) {
 		Log(ERROR, "Can not allocate port %d: %m\n", Conf.port);
-		return iRcv;
+		return -10;
 	}
 	irc = SendUDPCommand(Conf.IP, fifo_addr, len);
 	if (irc < 0) {
 		Log(ERROR, "Can not send read command to %d.%d.%d.%d via UDP: %m\n", 
 			(Conf.IP>>24) & 0xFF, (Conf.IP>>16) & 0xFF, (Conf.IP>>8) & 0xFF, Conf.IP & 0xFF);
-		return iRcv;
+		return -10;
 	}
 	rcvcnt = 0;
 	timecnt = 0;
@@ -2228,26 +2219,28 @@ int uwfd64::UDPBlockRead(unsigned int fifo_addr, unsigned int *data, int len)
 	while (rcvcnt < len) {
 		irc = read(sock, buff, sizeof(buff));
 		if (irc >= 12) {
-			if (buff[0] & 0x80000000) {
+			if (ntohl(buff[0]) & 0x80000000) {
 				Log(ERROR, "Error state signalled from the module\n");
 				close(sock);
 				return -50;
 			}
-			ln = buff[2];
+			ln = ntohl(buff[2]);
 			if (ln != irc - 12) {
-				Log(ERROR, "Length mismatch received = %d while anounced %d\n", irc - 12, ln);
+				Log(ERROR, "Length mismatch received = %d@%d: %8.8X %8.8X %8.8X\n", 
+					irc - 12, rcvcnt, ntohl(buff[0]), ntohl(buff[1]), ntohl(buff[2]));
 				close(sock);
 				return -60;
 			}
-			addr = buff[1] - fifo_addr;
+			addr = ntohl(buff[1]) - fifo_addr;
 			if (addr < 0 || addr + ln > len) {
 				Log(ERROR, "Address out of range: expected: %X-%X received: %X-%X\n",
-					fifo_addr, fifo_addr+len, buff[1], buff[1] + ln);
+					fifo_addr, fifo_addr+len, ntohl(buff[1]), ntohl(buff[1]) + ln);
 				close(sock);
 				return -70;
 			}
 			memcpy((char *)data + addr, &buff[3], ln);
 			rcvcnt += ln;
+			printf("%d bytes @%d\n", ln, addr);
 		} else if (irc > 0) {
 			Log(ERROR, "Strange block of length %d received\n", irc);
 			close(sock);
@@ -2255,7 +2248,7 @@ int uwfd64::UDPBlockRead(unsigned int fifo_addr, unsigned int *data, int len)
 		} else if (errno == EAGAIN) {
 			timecnt++;
 			if (timecnt > 500) {	// should be enough
-				Log(ERROR, "UDP receive timeout\n");
+				Log(ERROR, "UDP receive timeout @ %d bytes\n", rcvcnt);
 				close(sock);
 				return -20;
 			}

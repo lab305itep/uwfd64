@@ -86,6 +86,7 @@ public:
 	inline void SetStatus(void) { Status = 1;};
 	void SoftTrigger(int serial, int freq);
 	void Test(int serial = -1, int type = 0, int cnt = 1000000);
+	void UDPDump(int serial, int addr, int len);
 	void WriteFile(int serial, char *fname, int size);
 	void WriteNFile(int serial, char *fname, int size, int flag);
 	void ZeroTrigger(int serial);
@@ -398,6 +399,7 @@ int uwfd64_tool::DoTest(uwfd64 *ptr, int type, int cnt)
 		break;
 	case 10:
 		irc = ptr->TestSDRAMUDP(cnt);
+		break;
 	default:
 		irc = -10;
 		break;
@@ -746,6 +748,11 @@ void uwfd64_tool::Test(int serial, int type, int cnt)
 		if (irc) errcnt++;
 	}
 	if (!errcnt) ClearStatus();
+}
+
+void uwfd64_tool::UDPDump(int serial, int addr, int len)
+{
+	;
 }
 
 void uwfd64_tool::WriteFile(int serial, char *fname, int size)
@@ -1107,7 +1114,8 @@ void Help(void)
 	printf("W ms - wait ms milliseconds.\n");
 	printf("X num|* addr [data] - send/receive data from slave Xilinxes via SPI. addr - SPI address.\n");
 	printf("Y[P] num|* size|* fname - get size Mbytes of data to new format file fname;\n");
-	printf("Z num|*. - reset trigger/token counters in triggen\n");
+	printf("Z num|*. - reset trigger/token counters in triggen;\n");
+	printf(": num addr [len] - dump SDRAM at addr using UDP;\n");
 	printf("? - get return status of the last command\n");
 }
 
@@ -1212,7 +1220,7 @@ int Process(char *cmd, uwfd64_tool *tool)
 		tool->ClearStatus();
 		break;
 	case 'F':	// A32 dump
-	    	tool->SetStatus();
+		tool->SetStatus();
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {
 			printf("Need address.\n");
@@ -1556,6 +1564,26 @@ int Process(char *cmd, uwfd64_tool *tool)
 		}
 		serial = (tok[0] == '*') ? -1 : strtol(tok, NULL, 0);
 		tool->ZeroTrigger(serial);
+		break;
+	case ':': 
+		tool->SetStatus();
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need module serial number.\n");
+	    		Help();
+	    		break;
+		}
+		serial = strtol(tok, NULL, 0);
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need address.\n");
+			Help();
+			break;
+		}
+		addr = strtol(tok, NULL, 0);
+		tok = strtok(NULL, DELIM);
+		tool->UDPDump(serial, addr, (tok) ? strtol(tok, NULL, 0) : 0x400);
+		tool->ClearStatus();
 		break;
 	case '?':
 		printf("__%4.4d\n", tool->GetStatus());
