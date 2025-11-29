@@ -2201,16 +2201,30 @@ int uwfd64::UDPBlockRead(unsigned int fifo_addr, unsigned int *data, int len)
 	int addr;
 	int ln;
 	int irc;
+	char *mask;
+	int lmask;
+	int i;
+
+	lmask  = len /1024;
+	if (len % 1024) lmask++;
+	mask = (char *) malloc(lmask);
+	if (!mask) {
+		Log(ERROR, "Memory allocation (%d bytes) failed: %m\n", lmask);
+		return -10;
+	}
+	memset(mask, 0, lmask);
 
 	sock = AllocateUDPport(Conf.port);
 	if (sock < 0) {
 		Log(ERROR, "Can not allocate port %d: %m\n", Conf.port);
+		free(mask);
 		return -10;
 	}
 	irc = SendUDPCommand(Conf.IP, fifo_addr, len);
 	if (irc < 0) {
 		Log(ERROR, "Can not send read command to %d.%d.%d.%d via UDP: %m\n", 
 			(Conf.IP>>24) & 0xFF, (Conf.IP>>16) & 0xFF, (Conf.IP>>8) & 0xFF, Conf.IP & 0xFF);
+		free(mask);
 		return -10;
 	}
 	rcvcnt = 0;
@@ -2221,46 +2235,89 @@ int uwfd64::UDPBlockRead(unsigned int fifo_addr, unsigned int *data, int len)
 		if (irc >= 12) {
 			if (ntohl(buff[0]) & 0x80000000) {
 				Log(ERROR, "Error state signalled from the module\n");
-				close(sock);
-				return -50;
+				continue;
 			}
 			ln = ntohl(buff[2]);
 			if (ln != irc - 12) {
 				Log(ERROR, "Length mismatch received = %d@%d: %8.8X %8.8X %8.8X\n", 
 					irc - 12, rcvcnt, ntohl(buff[0]), ntohl(buff[1]), ntohl(buff[2]));
-				close(sock);
-				return -60;
+				continue;
 			}
 			addr = ntohl(buff[1]) - fifo_addr;
 			if (addr < 0 || addr + ln > len) {
 				Log(ERROR, "Address out of range: expected: %X-%X received: %X-%X\n",
 					fifo_addr, fifo_addr+len, ntohl(buff[1]), ntohl(buff[1]) + ln);
-				close(sock);
-				return -70;
+				continue;
 			}
-			memcpy((char *)data + addr, &buff[3], ln);
-			rcvcnt += ln;
-			printf("%d bytes @%d\n", ln, addr);
+			if (mask[addr/1024]) {
+				Log(INFO, "Duplicated udp packet for SDRAM address 0x%8.8X\n", ntohl(buff[1]));
+			} else {
+				mask[addr/1024]++;
+				rcvcnt += ln;
+				memcpy((char *)data + addr, &buff[3], ln);
+			}
+//			printf("%d bytes @%d\n", ln, addr);
 		} else if (irc > 0) {
 			Log(ERROR, "Strange block of length %d received\n", irc);
+			free(mask);
 			close(sock);
 			return -40;
 		} else if (errno == EAGAIN) {
 			timecnt++;
 			if (timecnt > 500) {	// should be enough
 				Log(ERROR, "UDP receive timeout @ %d bytes\n", rcvcnt);
+				for (i=0; i<lmask; i++) {
+					if(!(i & 63)) Log(DEBUG, "SDRAM[0x%8.8X]: ", fifo_addr + 1024*i);
+					Log(DEBUG, "%d", mask[i]);
+					if ((i & 7) == 7) Log(DEBUG, " ");
+					if ((i & 63) == 63) Log(DEBUG, "\n");
+				}
+				if (lmask & 63) Log(DEBUG, "\n");
+				free(mask);
 				close(sock);
 				return -20;
 			}
 			vmemap_usleep(1000);
 		} else {
 			Log(ERROR, "UDP receive error %m\n");
+			free(mask);
 			close(sock);
 			return -10;
 		}
 	}
+//	for (i=0; i<lmask; i++) {
+//		if(!(i & 63)) Log(DEBUG, "SDRAM[0x%8.8X]: ", fifo_addr + 1024*i);
+//		Log(DEBUG, "%d", mask[i]);
+//		if ((i & 7) == 7) Log(DEBUG, " ");
+//		if ((i & 63) == 63) Log(DEBUG, "\n");
+//	}
+//	if (lmask & 63) Log(DEBUG, "\n");
 	close(sock);
+	free(mask);
 	return 0;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Recevie and print block of SDRAM memory using UDP
+void uwfd64::UDPDump(int addr, int len)
+{
+	unsigned *data;
+	int i;
+	
+	data = (unsigned *) malloc(len);
+	if (!data) {
+		printf("Memory allocation of %d bytes failed: %m\n", len);
+		return;
+	}
+	i = UDPBlockRead(addr, data, len);
+	if (!i) {
+		for (i = 0; i < len/4; i++) {
+			if (!(i & 7)) printf("SDRAM[0x%8.8X]: ", addr + 4*i);
+			printf("%8.8X ", ntohl(data[i]));
+			if ((i & 7) == 7) printf("\n");
+		}
+		if (i & 7) printf("\n");
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////

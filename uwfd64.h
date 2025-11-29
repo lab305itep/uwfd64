@@ -749,6 +749,7 @@ public:
 	int TestSDRAMUDP(int cnt);
 	int TestSlaveReg16(int cnt);
 	int UDPBlockRead(unsigned int fifo_addr, unsigned int *data, int len);
+	void UDPDump(int addr, int len);
 	void WriteUserWord(int num);
 	void ZeroTrigger(void);
 

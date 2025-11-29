@@ -752,7 +752,13 @@ void uwfd64_tool::Test(int serial, int type, int cnt)
 
 void uwfd64_tool::UDPDump(int serial, int addr, int len)
 {
-	;
+	uwfd64 *ptr;
+	ptr = FindSerial(serial);
+	if (ptr == NULL) {
+		printf("Module %d not found.\n", serial);
+		return;
+	}
+	ptr->UDPDump(addr, len);
 }
 
 void uwfd64_tool::WriteFile(int serial, char *fname, int size)
