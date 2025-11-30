@@ -68,6 +68,7 @@ public:
 	inline void ClearStatus(void) { Status = 0;};
 	void Adjust(int serial, int adc);
 	void DACSet(int serial = -1, int val = 0x2000);
+	void FillSDRAM(int serial, int addr, int len);
 	inline int GetStatus(void) { return Status; };
 	void I2CRead(int serial, int addr);	
 	void I2CWrite(int serial, int addr, int ival);
@@ -407,6 +408,23 @@ int uwfd64_tool::DoTest(uwfd64 *ptr, int type, int cnt)
 	return irc;
 }
 
+void uwfd64_tool::FillSDRAM(int serial, int addr, int len)
+{
+	int i;
+	uwfd64 *ptr;
+	if (serial < 0) {
+		for (i=0; i<N; i++) array[i]->FillSDRAM(addr, len);
+	} else {
+		ptr = FindSerial(serial);
+		if (ptr == NULL) {
+			printf("Module %d not found.\n", serial);
+			return;
+		}
+		ptr->FillSDRAM(addr, len);
+	}
+	ClearStatus();
+}
+
 uwfd64 *uwfd64_tool::FindSerial(int num)
 {
 	int i;
@@ -695,7 +713,6 @@ void uwfd64_tool::ResetFIFO(int serial, int what)
 	}
 	ClearStatus();
 }
-
 
 void uwfd64_tool::SoftTrigger(int serial, int freq)
 {
@@ -1122,6 +1139,7 @@ void Help(void)
 	printf("Y[P] num|* size|* fname - get size Mbytes of data to new format file fname;\n");
 	printf("Z num|*. - reset trigger/token counters in triggen;\n");
 	printf(": num addr [len] - dump SDRAM at addr using UDP;\n");
+	printf("; num|* addr [len] - fill SDRAM memory with sequential 32-bit numbers;\n");
 	printf("? - get return status of the last command\n");
 }
 
@@ -1537,19 +1555,19 @@ int Process(char *cmd, uwfd64_tool *tool)
 		}
 		break;
 	case 'Y':	// Write data to file - new format, more than one module
-	    	tool->SetStatus();
+		tool->SetStatus();
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {
 			printf("Need module serial number.\n");
-	    		Help();
-	    		break;
+			Help();
+			break;
 		}
 		serial = (tok[0] == '*') ? -1 : strtol(tok, NULL, 0);
 		tok = strtok(NULL, DELIM);
 		if (tok == NULL) {
 			printf("Need amount of data to get.\n");
-	    		Help();
-	    		break;
+			Help();
+			break;
 		}
 		ival = (tok[0] == '*') ? -1 : strtol(tok, NULL, 0);
 		tok = strtok(NULL, DELIM);
@@ -1591,6 +1609,42 @@ int Process(char *cmd, uwfd64_tool *tool)
 		tool->UDPDump(serial, addr, (tok) ? strtol(tok, NULL, 0) : 0x400);
 		tool->ClearStatus();
 		break;
+	case ';':
+		tool->SetStatus();
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need module serial number.\n");
+			Help();
+			break;
+		}
+		serial = (tok[0] == '*') ? -1 : strtol(tok, NULL, 0);
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need address.\n");
+			Help();
+			break;
+		}
+		addr = strtol(tok, NULL, 0);
+		tok = strtok(NULL, DELIM);
+		tool->FillSDRAM(serial, addr, (tok) ? strtol(tok, NULL, 0) : 0x10000);
+		tool->ClearStatus();
+		break;
+
+		if (tok == NULL) {
+			printf("Need amount of data to get.\n");
+			Help();
+			break;
+		}
+		ival = (tok[0] == '*') ? -1 : strtol(tok, NULL, 0);
+		tok = strtok(NULL, DELIM);
+		if (tok == NULL) {
+			printf("Need filename.\n");
+	    		Help();
+	    		break;
+		}
+		tool->WriteNFile(serial, tok, ival, flag);
+		break;
+
 	case '?':
 		printf("__%4.4d\n", tool->GetStatus());
 		break;

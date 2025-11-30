@@ -709,6 +709,7 @@ public:
 	int ConfigureUDP(int enable = 1);
 	void EnableFifo(int what);
 	int DACSet(int val);
+	void FillSDRAM(int addr, int len);
 	int GetADCID(int num);
 	inline int GetBase16(void) { return A16BASE + serial * A16STEP; };
 	inline unsigned int GetBase32(void) { return A32BASE + ga * A32STEP; };

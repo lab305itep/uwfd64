@@ -647,6 +647,36 @@ void uwfd64::EnableFifo(int what)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Fill SDRAM with sequential numbers 
+void uwfd64::FillSDRAM(int addr, int len)
+{
+	unsigned *buf;
+	int i, j, k;
+	const int chank = MBYTE;
+	int top, irc;
+	
+	buf = (unsigned int *) malloc(chank);
+	if (!buf) {
+		Log(ERROR, "No memory for %d bytes: %m\n", chank);
+		return;
+	}
+	top = addr + len;
+	if (top > MEMSIZE) top = MEMSIZE;
+	for (i = addr; i < top; i += j) {	// cycle over passes
+		j = top - i;
+		if (j > chank) j = chank;
+		for (k = 0; k < j; k += 4) buf[k/4] = i + k;
+		irc = BlockTransfer(i, buf, j, 1);
+//			printf("Writing: i=%d j=%d k=%d irc=%d\n", i, j, k, irc);
+		if (irc) {
+			free(buf);
+			Log(ERROR, "VME DMA write error %m\n");
+			return;
+		}
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //	Read ADC ID : regs 1 and 2.
 //	num - ADC number (1-15)
 //	Return 16-bit value ID:GRADE if OK, -10 on error
@@ -1671,7 +1701,6 @@ int analyse(short *buf, int len, int ttype, int token, int blklen, double *slope
 		printf("\n");
 	}
 	return errcnt;
-
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1685,7 +1714,6 @@ int analyse(short *buf, int len, int ttype, int token, int blklen, double *slope
 //	
 int uwfd64::TestAllChannels(int cnt)
 {
-
 	const int PED_HIGH = 0x200;		// highest pedestal setting to comply with linearity	
 	const int PED_LOW = 0x4000-PED_HIGH;	// lowest pedestal setting to comply with linearity	
 	const int PED_MID = 0x2000;		// middle DAC setting
