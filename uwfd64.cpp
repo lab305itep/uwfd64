@@ -1161,7 +1161,7 @@ int uwfd64::Prog(char *fname)
 //	Get Def and module configuration data from config_t structure
 void uwfd64::ReadConfig(config_t *cnf)
 {
-    	int tmp;
+    	long tmp;
     	double dtmp;
     	char *stmp;
     	char str[1024];

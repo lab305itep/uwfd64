@@ -17,7 +17,7 @@ void Log(int level, const char *fmt, ...)
 
 void LogInit(config_t *cnf)
 {
-	int tmp;
+	long tmp;
 	char *stmp;
 	
 	fLog = stdout;
