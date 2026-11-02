@@ -925,6 +925,8 @@ int uwfd64::Init(void)
 	for (i=0; i<16; i++) if(ADCWrite(i, ADC_REG_CFG, ADC_CFG_RESET)) errcnt++;
 	// ADC output offset binary
 	for (i=0; i<16; i++) if(ADCWrite(i, ADC_REG_OUTPUT, 0)) errcnt++;
+	// ADC serial stream control - set 12 bits (we need 0x30 for 14 bits)
+	for (i=0; i<16; i++) if(ADCWrite(i, ADC_REG_OCTL, 0x32)) errcnt++;
 	// ADC input adjust
 	if (ADCAdjust()) {
 	    printf("Init %d ADCAdjust failed.\n", serial);
