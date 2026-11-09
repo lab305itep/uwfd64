@@ -548,6 +548,9 @@ struct uwfd64_a32_reg {
 #define ADC_OCTL_DDRBIT		0x20
 #define ADC_OCTL_DDRBYTE	0x30
 #define ADC_OCTL_SDRONE		0x40
+#define ADC_OCTL_14BITS		0
+#define ADC_OCTL_12BITS		2
+#define ADC_OCTL_10BITS		3
 
 #define ADC_REG_CCTL		0x22
 #define ADC_CCTL_RESET		2
@@ -558,6 +561,7 @@ struct uwfd64_a32_reg {
 
 #define ADC_REG_CONTROL		0x100
 #define ADC_CONTROL_OVERRIDE	0x40
+#define ADC_CONTROL_14BIT	0x10
 #define ADC_CONTROL_12BIT	0x20
 #define ADC_CONTROL_10BIT	0x30
 #define ADC_CONTROL_20MSPS	0

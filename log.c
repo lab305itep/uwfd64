@@ -17,7 +17,11 @@ void Log(int level, const char *fmt, ...)
 
 void LogInit(config_t *cnf)
 {
+#ifdef __i386__
 	long tmp;
+#else
+	int tmp;
+#endif
 	char *stmp;
 	
 	fLog = stdout;

@@ -927,6 +927,8 @@ int uwfd64::Init(void)
 	for (i=0; i<16; i++) if(ADCWrite(i, ADC_REG_OUTPUT, 0)) errcnt++;
 	// ADC serial stream control - set 12 bits (we need 0x30 for 14 bits)
 	for (i=0; i<16; i++) if(ADCWrite(i, ADC_REG_OCTL, 0x32)) errcnt++;
+	// We need to write 1 to this register to activate previous change
+	for (i=0; i<16; i++) if(ADCWrite(i, ADC_REG_OVERRIDE, ADC_OVERRIDE_FIRE)) errcnt++;
 	// ADC input adjust
 	if (ADCAdjust()) {
 	    printf("Init %d ADCAdjust failed.\n", serial);
@@ -1163,10 +1165,14 @@ int uwfd64::Prog(char *fname)
 //	Get Def and module configuration data from config_t structure
 void uwfd64::ReadConfig(config_t *cnf)
 {
-    	long tmp;
-    	double dtmp;
-    	char *stmp;
-    	char str[1024];
+#ifdef __i386__
+	long tmp;
+#else
+	int tmp;
+#endif
+	double dtmp;
+	char *stmp;
+	char str[1024];
 	char sect[16];
 	int i, j;
 	config_setting_t *ptr;
